@@ -2533,4 +2533,10 @@
     <string name="nexus_apply_failure_title">A última instalação do mod falhou</string>
     <string name="nexus_apply_failure_description">O mod não foi marcado como instalado. As alterações foram revertidas onde isso pôde ser verificado com segurança. Confira os erros de arquivo abaixo e volte para Posicionamento para corrigir ou tentar instalar este mod novamente.</string>
     <string name="nexus_apply_failure_details">Erros de arquivo: %1$d</string>
+    <string name="option_import_manifest_overrides">Importar substituições de manifesto</string>
+    <string name="option_clear_manifest_overrides">Remover substituições de manifesto</string>
+    <string name="manifest_overrides_imported">%1$d substituição(ões) de manifesto importada(s).</string>
+    <string name="manifest_overrides_import_failed">Não foi possível importar os manifestos: %1$s</string>
+    <string name="manifest_overrides_cleared">Substituições de manifesto removidas.</string>
+    <string name="manifest_overrides_clear_failed">Não foi possível remover as substituições de manifesto.</string>
 </resources>
