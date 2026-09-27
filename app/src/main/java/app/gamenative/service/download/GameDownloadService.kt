@@ -23,6 +23,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
@@ -119,6 +120,32 @@ object GameDownloadService {
                 }
             }.awaitAll()
         }.filterNotNull()
+
+        // A directly imported .manifest is staged only after resolveDepotForDownload() has
+        // successfully obtained the depot key from Steam. The Rust engine then validates the
+        // manifest's own depot/GID metadata before trusting the cache.
+        SteamService.instance?.applicationContext?.let { context ->
+            withContext(Dispatchers.IO) {
+                for (resolved in resolvedDepots) {
+                    if (
+                        SteamManifestOverrideStore.stageLocalManifest(
+                            context = context,
+                            appId = appId,
+                            depotId = resolved.depotId,
+                            manifestId = resolved.gid,
+                            installDir = installDir,
+                        )
+                    ) {
+                        Timber.tag(TAG).i(
+                            "Staged local manifest override depot=%d gid=%s",
+                            resolved.depotId,
+                            java.lang.Long.toUnsignedString(resolved.gid),
+                        )
+                    }
+                }
+            }
+        }
+
         for (resolved in resolvedDepots) {
             depotsJson.put(
                 JSONObject()
