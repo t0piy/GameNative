@@ -70,6 +70,9 @@ import app.gamenative.ui.enums.AppOptionMenuType
 import app.gamenative.ui.enums.DialogType
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.MarkerUtils
+import app.gamenative.utils.LuaToolsManifestProviderClient
+import app.gamenative.utils.LuaToolsManifestSource
+import app.gamenative.utils.LuaToolsProviderTransport
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.StorageUtils
@@ -408,6 +411,152 @@ class SteamAppScreen : BaseAppScreen() {
         // Read companion Snapshot map so status recomposes when the change-copy dialog updates it.
         val preferredCopyUi = preferredCopyUiByAppId[gameId]
         // familyGroupId flips early on LoggedOn; dataVersion bumps after shared-library refresh.
+        var showManifestProvidersDialog by remember(gameId) { mutableStateOf(false) }
+        var manifestProviders by remember(gameId) {
+            mutableStateOf<List<LuaToolsManifestSource>>(emptyList())
+        }
+        var checkingManifestProviders by remember(gameId) { mutableStateOf(false) }
+        var manifestProviderError by remember(gameId) { mutableStateOf<String?>(null) }
+        var downloadingManifestProvider by remember(gameId) { mutableStateOf<String?>(null) }
+
+        if (showManifestProvidersDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (downloadingManifestProvider == null) {
+                        showManifestProvidersDialog = false
+                    }
+                },
+                title = { Text(stringResource(R.string.manifest_providers_title)) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        when {
+                            checkingManifestProviders -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                    Text(stringResource(R.string.manifest_providers_checking))
+                                }
+                            }
+
+                            manifestProviderError != null -> {
+                                Text(manifestProviderError.orEmpty())
+                            }
+
+                            manifestProviders.isEmpty() -> {
+                                Text(stringResource(R.string.manifest_providers_none))
+                            }
+
+                            else -> {
+                                manifestProviders.forEach { source ->
+                                    val transportLabel = when (source.transport) {
+                                        LuaToolsProviderTransport.Direct ->
+                                            stringResource(R.string.manifest_provider_direct)
+                                        LuaToolsProviderTransport.LuaToolsProxy ->
+                                            stringResource(R.string.manifest_provider_proxy_auth)
+                                        LuaToolsProviderTransport.Hubcap ->
+                                            stringResource(R.string.manifest_provider_hubcap_key)
+                                    }
+                                    TextButton(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = source.available &&
+                                            downloadingManifestProvider == null,
+                                        onClick = {
+                                            when (source.transport) {
+                                                LuaToolsProviderTransport.Direct -> {
+                                                    downloadingManifestProvider = source.name
+                                                    scope.launch {
+                                                        try {
+                                                            val count =
+                                                                LuaToolsManifestProviderClient.downloadProvider(
+                                                                    context = context,
+                                                                    appId = gameId,
+                                                                    sourceName = source.name,
+                                                                    gameName = libraryItem.name,
+                                                                )
+                                                            hasManifestOverrides = true
+                                                            showManifestProvidersDialog = false
+                                                            SnackbarManager.show(
+                                                                context.getString(
+                                                                    R.string.manifest_overrides_imported,
+                                                                    count,
+                                                                ),
+                                                            )
+                                                        } catch (e: Exception) {
+                                                            Timber.w(
+                                                                e,
+                                                                "Manifest provider download failed app=$gameId source=${source.name}",
+                                                            )
+                                                            manifestProviderError =
+                                                                e.message ?: e.javaClass.simpleName
+                                                        } finally {
+                                                            downloadingManifestProvider = null
+                                                        }
+                                                    }
+                                                }
+
+                                                LuaToolsProviderTransport.LuaToolsProxy -> {
+                                                    SnackbarManager.show(
+                                                        context.getString(
+                                                            R.string.manifest_provider_proxy_auth,
+                                                        ),
+                                                    )
+                                                }
+
+                                                LuaToolsProviderTransport.Hubcap -> {
+                                                    SnackbarManager.show(
+                                                        context.getString(
+                                                            R.string.manifest_provider_hubcap_key,
+                                                        ),
+                                                    )
+                                                }
+                                            }
+                                        },
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalAlignment = Alignment.Start,
+                                        ) {
+                                            Text(source.displayName)
+                                            Text(
+                                                text = if (
+                                                    downloadingManifestProvider == source.name
+                                                ) {
+                                                    context.getString(
+                                                        R.string.manifest_provider_downloading,
+                                                        source.displayName,
+                                                    )
+                                                } else {
+                                                    "${source.status} · $transportLabel"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(
+                        enabled = downloadingManifestProvider == null,
+                        onClick = { showManifestProvidersDialog = false },
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
         val familyGroupId by SteamService.familyGroupIdFlow.collectAsState()
         val familyPreferredCopyDataVersion by SteamService.familyPreferredCopyDataVersion.collectAsState()
         LaunchedEffect(gameId, familyGroupId, familyPreferredCopyDataVersion) {
@@ -981,6 +1130,27 @@ class SteamAppScreen : BaseAppScreen() {
         )
 
         if (!isDownloadInProgress) {
+            options += AppMenuOption(
+                AppOptionMenuType.FindManifestProviders,
+                onClick = {
+                    showManifestProvidersDialog = true
+                    checkingManifestProviders = true
+                    manifestProviderError = null
+                    manifestProviders = emptyList()
+                    scope.launch {
+                        try {
+                            manifestProviders =
+                                LuaToolsManifestProviderClient.checkSources(gameId)
+                        } catch (e: Exception) {
+                            Timber.w(e, "Manifest provider discovery failed for app $gameId")
+                            manifestProviderError =
+                                e.message ?: e.javaClass.simpleName
+                        } finally {
+                            checkingManifestProviders = false
+                        }
+                    }
+                },
+            )
             options += AppMenuOption(
                 AppOptionMenuType.ImportManifestOverrides,
                 onClick = {
