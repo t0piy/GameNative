@@ -58,7 +58,7 @@ object SteamStoreSearchParser {
     )
 
     private val controlTagRegex = Regex(
-        """<(?:div|span)\b(?=[^>]*\bdata-param\s*=\s*["'][^"']+["'])(?=[^>]*\bdata-value\s*=\s*["'][^"']*["'])[^>]*>""",
+        """<(?:div|span)\b(?=[^>]*\bclass\s*=\s*["'][^"']*tab_filter_control[^"']*["'])(?=[^>]*\bdata-param\s*=\s*["'][^"']+["'])(?=[^>]*\bdata-value\s*=\s*["'][^"']*["'])[^>]*>""",
         setOf(RegexOption.IGNORE_CASE),
     )
     private val attributeRegex = Regex("""([\w-]+)\s*=\s*["']([^"']*)["']""")
