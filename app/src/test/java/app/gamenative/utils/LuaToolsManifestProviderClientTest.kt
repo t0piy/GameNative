@@ -36,6 +36,18 @@ class LuaToolsManifestProviderClientTest {
     }
 
     @Test
+    fun buildsRawDepotManifestUrlWithUnsignedGid() {
+        assertEquals(
+            "https://lua.tools/api/givemethemanifestpunk/1622461/" +
+                "18446744073709551615",
+            LuaToolsManifestProviderClient.luaToolsDepotManifestUrl(
+                depotId = 1_622_461,
+                manifestId = -1L,
+            ),
+        )
+    }
+
+    @Test
     fun buildsLuaToolsDlcMetadataUrlWithBaseApp() {
         assertEquals(
             "https://lua.tools/api/dlc/generate?appid=1622460&base=1222670" +
