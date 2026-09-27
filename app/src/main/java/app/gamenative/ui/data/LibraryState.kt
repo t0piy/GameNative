@@ -75,6 +75,7 @@ data class LibraryState(
     val gogCount: Int = 0,
     val epicCount: Int = 0,
     val amazonCount: Int = 0,
+    val luaToolsCount: Int = 0,
     val localCount: Int = 0,
     val favoritesCount: Int = 0,
 )
