@@ -82,6 +82,15 @@ enum class LibraryTab(
         showAmazon = true,
         installedOnly = false,
     ),
+    LUATOOLS(
+        labelResId = R.string.tab_luatools,
+        showCustom = true,
+        showSteam = true,
+        showGoG = true,
+        showEpic = true,
+        showAmazon = true,
+        installedOnly = true,
+    ),
     LOCAL(
         labelResId = R.string.tab_local,
         showCustom = true,
@@ -94,7 +103,7 @@ enum class LibraryTab(
     ;
 
     companion object {
-        val configurableEntries = listOf(RECOMMENDED, STEAM, GOG, EPIC, AMAZON)
+        val configurableEntries = listOf(RECOMMENDED, STEAM, GOG, EPIC, AMAZON, LUATOOLS)
 
         /**
          * Tabs shown in the UI. Custom (LOCAL) games work on all flavors: legacy maps folders
