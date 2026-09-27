@@ -73,6 +73,43 @@ class LuaManifestOverrideParserTest {
     }
 
     @Test
+    fun parsesRawSteamManifestMetadataForProgressSizing() {
+        fun u32(value: Long): ByteArray = byteArrayOf(
+            (value and 0xff).toByte(),
+            ((value shr 8) and 0xff).toByte(),
+            ((value shr 16) and 0xff).toByte(),
+            ((value shr 24) and 0xff).toByte(),
+        )
+
+        fun varint(value: ULong): ByteArray {
+            var remaining = value
+            val out = mutableListOf<Byte>()
+            do {
+                var next = (remaining and 0x7fu).toByte()
+                remaining = remaining shr 7
+                if (remaining != 0uL) next = (next.toInt() or 0x80).toByte()
+                out += next
+            } while (remaining != 0uL)
+            return out.toByteArray()
+        }
+
+        val metadata =
+            varint(8u) + varint(123u) +
+                varint(16u) + varint(456u) +
+                varint(40u) + varint(789u)
+        val raw =
+            u32(0x71F617D0L) + u32(0) +
+                u32(0x1F4812BEL) + u32(metadata.size.toLong()) + metadata +
+                u32(0x32C415ABL) + u32(0)
+
+        val parsed = SteamManifestOverrideStore.parseRawSteamManifestMetadata(raw)
+
+        assertEquals(123, parsed?.depotId)
+        assertEquals(456L, parsed?.manifestId)
+        assertEquals(789L, parsed?.sizeOnDisk)
+    }
+
+    @Test
     fun lastActivePinForDepotWins() {
         val parsed = LuaManifestOverrideParser.parse(
             """
