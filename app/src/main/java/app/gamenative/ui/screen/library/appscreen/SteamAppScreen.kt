@@ -470,6 +470,8 @@ class SteamAppScreen : BaseAppScreen() {
 
     override fun isValidToDownload(context: Context, libraryItem: LibraryItem): Boolean {
         val appInfo = SteamService.getAppInfoOf(libraryItem.gameId) ?: return false
+        if (appInfo.packageId == SteamService.INVALID_PKG_ID) return false
+        if (!SteamService.isAppLicensed(appInfo.packageId)) return false
         return appInfo.depots.isNotEmpty()
     }
 
