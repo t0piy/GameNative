@@ -2551,4 +2551,10 @@
     <string name="manifest_provider_proxy_auth">Requer login no lua.tools</string>
     <string name="manifest_provider_hubcap_key">Requer chave do Hubcap</string>
     <string name="manifest_provider_downloading">Baixando de %1$s…</string>
+    <string name="settings_manifest_fast_fetch_title">FastFetch de manifestos</string>
+    <string name="settings_manifest_fast_fetch_subtitle">Antes de uma nova instalação Steam, tenta importar automaticamente manifestos de providers diretos disponíveis. Se falhar, o download Steam continua normalmente.</string>
+    <string name="settings_manifest_fast_fetch_cleartext_title">Permitir providers HTTP no FastFetch</string>
+    <string name="settings_manifest_fast_fetch_cleartext_subtitle">Permite FastFetch automático de providers diretos sem HTTPS, como o endpoint legado do Ryuu. Use apenas se você aceitar o risco de integridade de HTTP.</string>
+    <string name="manifest_fast_fetch_checking">Procurando manifestos alternativos…</string>
+    <string name="manifest_fast_fetch_used">Manifestos importados de %1$s; iniciando download Steam.</string>
 </resources>
