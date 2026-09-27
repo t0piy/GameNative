@@ -140,7 +140,103 @@ object LuaToolsManifestProviderClient {
     )
 
     /**
-     * Best-effort FastFetch for a fresh GameNative install.
+     * Best-effort FastFetch using every transport the user has configured.
+     *
+     * Priority is Hubcap (matching LuaTools' key-gated-first behavior), then known direct providers,
+     * then authenticated lua.tools proxy providers. Failures fall through and never block Steam.
+     */
+    suspend fun fastFetch(
+        context: Context,
+        appId: Int,
+        gameName: String? = null,
+        allowCleartextDirect: Boolean = false,
+    ): FastFetchResult? = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+        if (SteamManifestOverrideStore.hasOverrides(context, appId)) {
+            return@withContext null
+        }
+
+        val credentials = ManifestProviderAuthManager.getCredentials(context)
+
+        credentials.hubcapApiKey?.takeIf { it.isNotBlank() }?.let { key ->
+            val available = checkHubcapStatus(appId, key).equals("available", ignoreCase = true)
+            if (available) {
+                val imported = runCatching {
+                    downloadHubcap(
+                        context = context,
+                        appId = appId,
+                        hubcapApiKey = key,
+                    )
+                }.onFailure {
+                    Timber.w(it, "FastFetch Hubcap failed for app %d", appId)
+                }.getOrNull()
+
+                if (imported != null && imported > 0) {
+                    return@withContext FastFetchResult(
+                        sourceName = HUBCAP_SOURCE_NAME,
+                        importedCount = imported,
+                    )
+                }
+            }
+        }
+
+        val direct = fastFetchDirect(
+            context = context,
+            appId = appId,
+            gameName = gameName,
+            allowCleartextDirect = allowCleartextDirect,
+        )
+        if (direct != null) return@withContext direct
+
+        if (credentials.luaToolsSession != null) {
+            val bearer = runCatching {
+                ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
+            }.onFailure {
+                Timber.w(it, "FastFetch lua.tools session unavailable for app %d", appId)
+            }.getOrNull()
+
+            if (!bearer.isNullOrBlank()) {
+                val proxySources = runCatching {
+                    checkSources(appId)
+                }.getOrDefault(emptyList())
+                    .filter {
+                        it.available && it.transport == LuaToolsProviderTransport.LuaToolsProxy
+                    }
+                    .sortedBy { it.displayName.lowercase() }
+
+                for (source in proxySources) {
+                    val imported = runCatching {
+                        downloadProvider(
+                            context = context,
+                            appId = appId,
+                            sourceName = source.name,
+                            luaToolsBearerToken = bearer,
+                            gameName = gameName,
+                        )
+                    }.onFailure {
+                        Timber.w(
+                            it,
+                            "FastFetch proxy provider failed app=%d source=%s",
+                            appId,
+                            source.name,
+                        )
+                    }.getOrNull() ?: continue
+
+                    if (imported > 0) {
+                        return@withContext FastFetchResult(
+                            sourceName = source.name,
+                            importedCount = imported,
+                        )
+                    }
+                }
+            }
+        }
+
+        null
+    }
+
+    /**
+     * Best-effort keyless direct-provider FastFetch helper.
      *
      * Existing manual overrides always win: if the user already imported/pinned anything for this
      * app, this returns null without contacting providers. Only keyless DIRECT providers participate;
