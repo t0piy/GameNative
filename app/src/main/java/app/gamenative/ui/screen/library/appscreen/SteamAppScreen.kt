@@ -1182,6 +1182,68 @@ class SteamAppScreen : BaseAppScreen() {
                                 }
                             }
                         }
+
+                        if (selectedManifestTargetAppId != gameId) {
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = downloadingManifestProvider == null &&
+                                    !checkingManifestProviders,
+                                onClick = {
+                                    val targetAppId = selectedManifestTargetAppId
+                                    downloadingManifestProvider = "lua.tools DLC"
+                                    manifestProviderError = null
+                                    scope.launch {
+                                        try {
+                                            val count =
+                                                LuaToolsManifestProviderClient
+                                                    .downloadLuaToolsDlcMetadata(
+                                                        context = context,
+                                                        baseAppId = gameId,
+                                                        dlcAppId = targetAppId,
+                                                        gameName = SteamService
+                                                            .getAppInfoOf(targetAppId)
+                                                            ?.name,
+                                                    )
+                                            hasManifestOverrides = true
+                                            showManifestProvidersDialog = false
+                                            SnackbarManager.show(
+                                                context.getString(
+                                                    R.string.manifest_overrides_imported,
+                                                    count,
+                                                ),
+                                            )
+                                        } catch (e: Exception) {
+                                            Timber.w(
+                                                e,
+                                                "lua.tools DLC metadata download failed " +
+                                                    "base=$gameId dlc=$targetAppId",
+                                            )
+                                            manifestProviderError =
+                                                e.message ?: e.javaClass.simpleName
+                                        } finally {
+                                            downloadingManifestProvider = null
+                                        }
+                                    }
+                                },
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.Start,
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.manifest_provider_luatools_dlc,
+                                        ),
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.manifest_provider_luatools_dlc_description,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
                     }
                 },
                 confirmButton = {
