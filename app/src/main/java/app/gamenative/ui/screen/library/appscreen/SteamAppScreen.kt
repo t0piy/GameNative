@@ -838,6 +838,11 @@ class SteamAppScreen : BaseAppScreen() {
         var hasManifestOverrides by remember(gameId) {
             mutableStateOf(SteamManifestOverrideStore.hasOverrides(context, gameId))
         }
+        LaunchedEffect(gameId, isDownloadInProgress) {
+            hasManifestOverrides = withContext(Dispatchers.IO) {
+                SteamManifestOverrideStore.hasOverrides(context, gameId)
+            }
+        }
         var showManifestOverridesDialog by remember(gameId) { mutableStateOf(false) }
         var activeManifestOverrides by remember(gameId) {
             mutableStateOf<List<SteamManifestOverride>>(emptyList())
