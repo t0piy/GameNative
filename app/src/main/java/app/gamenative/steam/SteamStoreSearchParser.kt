@@ -14,6 +14,49 @@ object SteamStoreSearchParser {
         val totalCount: Int,
     )
 
+
+    private val PLAYER_FILTER_LABELS = setOf(
+        "Single-player",
+        "Multi-player",
+        "PvP",
+        "Online PvP",
+        "LAN PvP",
+        "Shared/Split Screen PvP",
+        "Co-op",
+        "Online Co-op",
+        "LAN Co-op",
+        "Shared/Split Screen Co-op",
+        "Shared/Split Screen",
+        "Cross-Platform Multiplayer",
+    )
+
+    private val ACCESSIBILITY_FILTER_LABELS = setOf(
+        "Adjustable Difficulty",
+        "Save Anytime",
+        "Adjustable Text Size",
+        "Subtitle Options",
+        "Color Alternatives",
+        "Camera Comfort",
+        "Playable without Vision",
+        "Contrast Controls",
+        "Custom Volume Controls",
+        "Stereo Sound",
+        "Surround Sound",
+        "Narrated Game Menus",
+        "Playable without Timed Input",
+        "Keyboard Only Option",
+        "Mouse Only Option",
+        "Touch Only Option",
+        "Chat Speech-to-text",
+        "Chat Text-to-speech",
+        "Playable at Your Own Pace",
+    )
+
+    private val VR_FILTER_LABELS = setOf(
+        "VR Only",
+        "VR Supported",
+    )
+
     private val controlTagRegex = Regex(
         """<(?:div|span)\b[^>]*\bdata-param\s*=\s*["'][^"']+["'][^>]*\bdata-value\s*=\s*["'][^"']*["'][^>]*>""",
         setOf(RegexOption.IGNORE_CASE),
@@ -38,7 +81,7 @@ object SteamStoreSearchParser {
                         param = param,
                         value = value,
                         label = label,
-                        group = groupTitle(param),
+                        group = groupTitle(param, label),
                     )
                 }
             }
@@ -51,16 +94,18 @@ object SteamStoreSearchParser {
         }
 
         val groups = merged
-            .groupBy { it.param }
-            .map { (param, values) ->
+            .groupBy { option -> option.param to option.group }
+            .map { (identity, values) ->
+                val (param, title) = identity
+                val keySuffix = title.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
                 SteamStoreFilterGroup(
-                    key = param,
-                    title = values.firstOrNull()?.group ?: groupTitle(param),
+                    key = if (title == groupTitle(param)) param else "$param:$keySuffix",
+                    title = title,
                     options = values.sortedBy { it.label.lowercase() },
                 )
             }
             .sortedWith(
-                compareBy<SteamStoreFilterGroup> { groupOrder(it.key) }
+                compareBy<SteamStoreFilterGroup> { groupOrder(it.key, it.title) }
                     .thenBy { it.title.lowercase() },
             )
 
@@ -178,10 +223,15 @@ object SteamStoreSearchParser {
     private fun attributes(tag: String): Map<String, String> =
         attributeRegex.findAll(tag).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
 
-    private fun groupTitle(param: String): String = when (param) {
+    private fun groupTitle(param: String, label: String = ""): String = when (param) {
         "tags" -> "Tags"
         "category1" -> "Product types"
-        "category2", "category3" -> "Players, features, accessibility & VR"
+        "category2", "category3" -> when {
+            label in PLAYER_FILTER_LABELS -> "Number of players"
+            label in ACCESSIBILITY_FILTER_LABELS -> "Accessibility"
+            label in VR_FILTER_LABELS -> "VR support"
+            else -> "Features"
+        }
         "controllersupport" -> "Controller support"
         "deck_compatibility" -> "Steam Deck compatibility"
         "os" -> "Operating system"
@@ -194,14 +244,17 @@ object SteamStoreSearchParser {
             }
     }
 
-    private fun groupOrder(param: String): Int = when (param) {
-        "category1" -> 0
-        "tags" -> 1
-        "category2", "category3" -> 2
-        "controllersupport" -> 3
-        "deck_compatibility" -> 4
-        "os" -> 5
-        "supportedlang" -> 6
+    private fun groupOrder(key: String, title: String): Int = when {
+        key == "category1" -> 0
+        key == "tags" -> 1
+        title == "Number of players" -> 2
+        title == "Features" -> 3
+        key.startsWith("controllersupport") -> 4
+        title == "Accessibility" -> 5
+        key.startsWith("deck_compatibility") -> 6
+        title == "VR support" -> 7
+        key.startsWith("os") -> 8
+        key.startsWith("supportedlang") -> 9
         else -> 100
     }
 
@@ -210,7 +263,7 @@ object SteamStoreSearchParser {
      */
     private fun fallbackOptions(): List<SteamStoreFilterOption> = buildList {
         fun option(param: String, value: String, label: String) {
-            add(SteamStoreFilterOption(param, value, label, groupTitle(param)))
+            add(SteamStoreFilterOption(param, value, label, groupTitle(param, label)))
         }
 
         option("category1", "998", "Games")
