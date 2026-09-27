@@ -36,6 +36,19 @@ class LuaToolsManifestProviderClientTest {
     }
 
     @Test
+    fun buildsLuaToolsDlcMetadataUrlWithBaseApp() {
+        assertEquals(
+            "https://lua.tools/api/dlc/generate?appid=1622460&base=1222670" +
+                "&game_name=Example+Pack",
+            LuaToolsManifestProviderClient.luaToolsDlcGenerateUrl(
+                baseAppId = 1_222_670,
+                dlcAppId = 1_622_460,
+                gameName = "Example Pack",
+            ),
+        )
+    }
+
+    @Test
     fun unknownProviderRequiresAnotherTransport() {
         assertNull(
             LuaToolsManifestProviderClient.directProviderUrl("Skyflare", 1145350),
