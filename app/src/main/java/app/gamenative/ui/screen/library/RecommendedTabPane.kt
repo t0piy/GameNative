@@ -409,7 +409,25 @@ private fun SteamExplorerPane(
                 label = { Text(stringResource(R.string.explorer_steam_search_hint)) },
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(onClick = { showFilters = true }) {
+            IconButton(
+                enabled = !state.searchLoading,
+                onClick = viewModel::refresh,
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { showFilters = true },
+                modifier = Modifier.weight(1f),
+            ) {
                 Icon(
                     imageVector = Icons.Default.FilterList,
                     contentDescription = null,
@@ -422,22 +440,25 @@ private fun SteamExplorerPane(
                     } else {
                         stringResource(R.string.explorer_steam_filters)
                     },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            OutlinedButton(onClick = { showAddById = true }) {
+            OutlinedButton(
+                onClick = { showAddById = true },
+                modifier = Modifier.weight(1f),
+            ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(modifier = Modifier.size(6.dp))
-                Text(stringResource(R.string.explorer_steam_add_by_id))
-            }
-            IconButton(
-                enabled = !state.searchLoading,
-                onClick = viewModel::refresh,
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                Text(
+                    text = stringResource(R.string.explorer_steam_add_by_id),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
 
