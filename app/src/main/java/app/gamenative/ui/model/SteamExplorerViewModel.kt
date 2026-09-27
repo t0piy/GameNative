@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,7 +60,20 @@ class SteamExplorerViewModel @Inject constructor(
             query
                 .debounce(250)
                 .distinctUntilChanged()
-                .flatMapLatest { steamCatalogDao.search(it.trim()) }
+                .flatMapLatest { rawQuery ->
+                    val normalized = rawQuery.trim()
+                    flow {
+                        if (normalized.length >= 2) {
+                            val remote = withContext(Dispatchers.IO) {
+                                SteamCatalogRepository.searchStore(normalized)
+                            }
+                            if (remote.isNotEmpty()) {
+                                steamCatalogDao.insertAll(remote)
+                            }
+                        }
+                        emitAll(steamCatalogDao.search(normalized))
+                    }
+                }
                 .collect { games ->
                     _state.update { it.copy(games = games) }
                 }
