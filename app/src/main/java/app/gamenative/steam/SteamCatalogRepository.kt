@@ -212,11 +212,75 @@ object SteamCatalogRepository {
         appId: Int,
         cacheDao: SteamSearchCacheDao,
         forceRefresh: Boolean = false,
+    ): AppDetailsOutcome = loadAppDetailsForLocale(
+        appId = appId,
+        country = steamCountry(),
+        language = steamLanguage(),
+        cacheDao = cacheDao,
+        forceRefresh = forceRefresh,
+    )
+
+    /**
+     * AppID-only discovery can resolve products that are hidden from the user's regional Store.
+     *
+     * The alternate country codes are used for public metadata only. They never affect account
+     * licenses, ownership, purchasing or downloads.
+     */
+    suspend fun loadManualAppDetails(
+        appId: Int,
+        cacheDao: SteamSearchCacheDao,
+        forceRefresh: Boolean = false,
+    ): AppDetailsOutcome {
+        if (appId <= 0) return AppDetailsOutcome(error = "Invalid AppID")
+
+        val localCountry = steamCountry()
+        val locales = buildList {
+            add(localCountry to steamLanguage())
+            listOf("US", "GB", "DE", "JP").forEach { country ->
+                if (!country.equals(localCountry, ignoreCase = true)) {
+                    add(country to "english")
+                }
+            }
+        }
+
+        var lastError: String? = null
+        var staleFallback: AppDetailsOutcome? = null
+        for ((country, language) in locales) {
+            val outcome = loadAppDetailsForLocale(
+                appId = appId,
+                country = country,
+                language = language,
+                cacheDao = cacheDao,
+                forceRefresh = forceRefresh,
+            )
+            if (outcome.details != null && !outcome.staleCache) {
+                return outcome
+            }
+            if (outcome.details != null && staleFallback == null) {
+                staleFallback = outcome
+            }
+            if (!outcome.error.isNullOrBlank()) lastError = outcome.error
+        }
+
+        return staleFallback ?: AppDetailsOutcome(
+            error = lastError ?: "Steam Store returned no public metadata for AppID $appId",
+        )
+    }
+
+    private suspend fun loadAppDetailsForLocale(
+        appId: Int,
+        country: String,
+        language: String,
+        cacheDao: SteamSearchCacheDao,
+        forceRefresh: Boolean,
     ): AppDetailsOutcome {
         if (appId <= 0) return AppDetailsOutcome(error = "Invalid AppID")
 
         val now = System.currentTimeMillis()
-        val cacheKey = "steam-store:appdetails:v1:${steamCountry()}:${steamLanguage()}:$appId"
+        val normalizedCountry = country.uppercase()
+        val normalizedLanguage = language.lowercase()
+        val cacheKey =
+            "steam-store:appdetails:v2:$normalizedCountry:$normalizedLanguage:$appId"
         val cachedEntry = cacheDao.get(cacheKey)
         val cachedDetails = cachedEntry?.let {
             runCatching { decodeAppDetails(it.payloadJson) }.getOrNull()
@@ -232,16 +296,16 @@ object SteamCatalogRepository {
         return try {
             val url =
                 "https://store.steampowered.com/api/appdetails?appids=$appId" +
-                    "&cc=${encode(steamCountry())}&l=${encode(steamLanguage())}"
+                    "&cc=${encode(normalizedCountry)}&l=${encode(normalizedLanguage)}"
             val body = execute(url)
             val root = JSONObject(body)
             val wrapper = root.optJSONObject(appId.toString())
-                ?: error("Steam Store returned no details for AppID $appId")
+                ?: error("Steam Store returned no details for AppID $appId ($normalizedCountry)")
             if (!wrapper.optBoolean("success", false)) {
-                error("Steam Store could not load AppID $appId")
+                error("Steam Store could not load AppID $appId ($normalizedCountry)")
             }
             val data = wrapper.optJSONObject("data")
-                ?: error("Steam Store returned empty details for AppID $appId")
+                ?: error("Steam Store returned empty details for AppID $appId ($normalizedCountry)")
             val details = parseAppDetails(appId, data)
 
             cacheDao.put(
@@ -257,7 +321,7 @@ object SteamCatalogRepository {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Timber.w(e, "Steam Store appdetails failed for $appId")
+            Timber.w(e, "Steam Store appdetails failed for $appId in $normalizedCountry")
             if (cachedEntry != null && cachedDetails != null &&
                 now - cachedEntry.updatedAt <= DETAILS_CACHE_STALE_MS
             ) {
