@@ -1362,9 +1362,47 @@ class SteamAppScreen : BaseAppScreen() {
                 onClick = {
                     scope.launch {
                         activeManifestOverrides = withContext(Dispatchers.IO) {
-                            SteamManifestOverrideStore.load(context, gameId)
-                                .values
-                                .sortedBy { it.depotId }
+                            val depots = SteamService.getDownloadableDepots(gameId)
+                            val namespaceIds = buildSet {
+                                add(gameId)
+                                depots.values.forEach { depot ->
+                                    add(
+                                        SteamManifestOverrideStore.owningAppId(
+                                            parentAppId = gameId,
+                                            dlcAppId = depot.dlcAppId,
+                                            depotFromApp = depot.depotFromApp,
+                                            invalidAppId = SteamService.INVALID_APP_ID,
+                                        ),
+                                    )
+                                }
+                            }
+                            val overridesByApp = namespaceIds.associateWith { namespaceAppId ->
+                                SteamManifestOverrideStore.load(context, namespaceAppId)
+                            }
+
+                            depots.values.mapNotNull { depot ->
+                                val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                                    parentAppId = gameId,
+                                    dlcAppId = depot.dlcAppId,
+                                    depotFromApp = depot.depotFromApp,
+                                    invalidAppId = SteamService.INVALID_APP_ID,
+                                )
+                                overridesByApp[ownerAppId]?.get(depot.depotId)
+                                    ?: if (ownerAppId != gameId) {
+                                        overridesByApp[gameId]?.get(depot.depotId)
+                                    } else {
+                                        null
+                                    }
+                            }
+                                .distinctBy {
+                                    Pair(it.namespaceAppId ?: gameId, it.depotId)
+                                }
+                                .sortedWith(
+                                    compareBy<SteamManifestOverride>(
+                                        { it.namespaceAppId ?: gameId },
+                                        { it.depotId },
+                                    ),
+                                )
                         }
                         showManifestOverridesDialog = true
                     }
@@ -1420,7 +1458,23 @@ class SteamAppScreen : BaseAppScreen() {
                     onClick = {
                         scope.launch {
                             val cleared = withContext(Dispatchers.IO) {
-                                SteamManifestOverrideStore.clear(context, gameId)
+                                val depots = SteamService.getDownloadableDepots(gameId)
+                                val namespaces = buildSet {
+                                    add(gameId)
+                                    depots.values.forEach { depot ->
+                                        add(
+                                            SteamManifestOverrideStore.owningAppId(
+                                                parentAppId = gameId,
+                                                dlcAppId = depot.dlcAppId,
+                                                depotFromApp = depot.depotFromApp,
+                                                invalidAppId = SteamService.INVALID_APP_ID,
+                                            ),
+                                        )
+                                    }
+                                }
+                                namespaces.all { namespaceAppId ->
+                                    SteamManifestOverrideStore.clear(context, namespaceAppId)
+                                }
                             }
                             if (cleared) {
                                 hasManifestOverrides = false
