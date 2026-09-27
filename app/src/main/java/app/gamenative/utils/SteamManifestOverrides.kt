@@ -485,6 +485,13 @@ object SteamManifestOverrideStore {
      * staged file, verifies that its metadata depot/GID match, decrypts filenames with the Steam
      * key and otherwise falls back to its normal CDN manifest fetch path if the cache is unusable.
      */
+    fun hasLocalManifest(
+        context: Context,
+        appId: Int,
+        depotId: Int,
+        manifestId: Long,
+    ): Boolean = localManifestFile(context, appId, depotId, manifestId)?.isFile == true
+
     fun stageLocalManifestForDepot(
         context: Context,
         parentAppId: Int,
