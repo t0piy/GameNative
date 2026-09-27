@@ -2738,7 +2738,7 @@
     <string name="manifest_override_source_luatools">lua.tools provider</string>
     <string name="manifest_override_source_hubcap">Hubcap</string>
     <string name="manifest_override_source_unknown">Unknown source</string>
-    <string name="manifest_overrides_info">These GIDs override manifest selection before download. Depot authorization and the depot key are still obtained normally from Steam.</string>
+    <string name="manifest_overrides_info">These GIDs override manifest selection before download.</string>
     <string name="manifest_target_label">Target app/DLC</string>
     <string name="manifest_target_base">Base game · %1$d</string>
     <string name="manifest_target_dlc">%1$s · DLC %2$d</string>
@@ -2801,7 +2801,7 @@
     <!-- Steam Explorer manual AppID -->
     <string name="explorer_steam_add_by_id">Add by AppID</string>
     <string name="explorer_steam_add_by_id_title">Add Steam product by AppID</string>
-    <string name="explorer_steam_add_by_id_description">Use this when a Steam product is hidden from search or unavailable in your region. GameNative LuaTools will try the local Store, alternate Store regions for public metadata, and authenticated PICS when available. This does not grant ownership or a license.</string>
+    <string name="explorer_steam_add_by_id_description">Use this when a Steam product is hidden from search or unavailable in your region. GameNative LuaTools will try the local Store, alternate Store regions for public metadata, and authenticated PICS when available.</string>
     <string name="explorer_steam_appid_input">Steam AppID</string>
     <string name="explorer_steam_appid_example">Example: 1250650</string>
     <string name="explorer_steam_add">Add</string>
