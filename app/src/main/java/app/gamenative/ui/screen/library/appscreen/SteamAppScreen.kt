@@ -1842,15 +1842,50 @@ class SteamAppScreen : BaseAppScreen() {
                     val depots = SteamService.getDownloadableDepots(gameId, language)
                     Timber.i("There are ${depots.size} depots belonging to ${libraryItem.appId}")
                     val branch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
-                    val manifestOverrides = SteamManifestOverrideStore.load(context, gameId)
+                    val namespaceIds = buildSet {
+                        add(gameId)
+                        depots.values.forEach { depot ->
+                            add(
+                                SteamManifestOverrideStore.owningAppId(
+                                    parentAppId = gameId,
+                                    dlcAppId = depot.dlcAppId,
+                                    depotFromApp = depot.depotFromApp,
+                                    invalidAppId = SteamService.INVALID_APP_ID,
+                                ),
+                            )
+                        }
+                    }
+                    val manifestOverridesByApp = namespaceIds.associateWith { namespaceAppId ->
+                        SteamManifestOverrideStore.load(context, namespaceAppId)
+                    }
+                    fun overrideFor(depot: app.gamenative.data.DepotInfo): SteamManifestOverride? {
+                        val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                            parentAppId = gameId,
+                            dlcAppId = depot.dlcAppId,
+                            depotFromApp = depot.depotFromApp,
+                            invalidAppId = SteamService.INVALID_APP_ID,
+                        )
+                        return manifestOverridesByApp[ownerAppId]?.get(depot.depotId)
+                            ?: if (ownerAppId != gameId) {
+                                manifestOverridesByApp[gameId]?.get(depot.depotId)
+                            } else {
+                                null
+                            }
+                    }
                     val availableBytes = StorageUtils.getAvailableSpaceForUncreatedPath(SteamService.getAppDirPath(gameId))
                     val downloadBytes = depots.values.sumOf { depot ->
-                        manifestOverrides[depot.depotId]?.sizeOnDisk
-                            ?: SteamUtils.getDownloadBytes(depot.manifests[branch])
+                        overrideFor(depot)?.sizeOnDisk
+                            ?: SteamUtils.getDownloadBytes(
+                                depot.manifests[branch]
+                                    ?: depot.encryptedManifests[branch]
+                                    ?: depot.manifests["public"],
+                            )
                     }
                     val installBytes = depots.values.sumOf { depot ->
-                        manifestOverrides[depot.depotId]?.sizeOnDisk
+                        overrideFor(depot)?.sizeOnDisk
                             ?: depot.manifests[branch]?.size
+                            ?: depot.encryptedManifests[branch]?.size
+                            ?: depot.manifests["public"]?.size
                             ?: 0L
                     }
                     InstallSizeInfo(
