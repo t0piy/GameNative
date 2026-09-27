@@ -301,14 +301,8 @@ object LuaToolsManifestProviderClient {
         require(dlcAppId > 0 && dlcAppId != baseAppId) { "Invalid DLC Steam app id" }
 
         val bearer = ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
-        val game = gameName
-            ?.takeIf { it.isNotBlank() }
-            ?.let { "&game_name=${encode(it)}" }
-            .orEmpty()
-        val url =
-            "$LUA_TOOLS_API_BASE/api/dlc/generate?appid=$dlcAppId&base=$baseAppId$game"
         val request = Request.Builder()
-            .url(url)
+            .url(luaToolsDlcGenerateUrl(baseAppId, dlcAppId, gameName))
             .header("Authorization", "Bearer $bearer")
             .get()
             .build()
@@ -536,6 +530,20 @@ object LuaToolsManifestProviderClient {
         sourceName.equals("Ryuu", ignoreCase = true) -> 0
         sourceName.equals("Sushi", ignoreCase = true) -> 1
         else -> 100
+    }
+
+    internal fun luaToolsDlcGenerateUrl(
+        baseAppId: Int,
+        dlcAppId: Int,
+        gameName: String? = null,
+    ): String {
+        require(baseAppId > 0) { "Invalid base Steam app id" }
+        require(dlcAppId > 0 && dlcAppId != baseAppId) { "Invalid DLC Steam app id" }
+        val game = gameName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "&game_name=${encode(it)}" }
+            .orEmpty()
+        return "$LUA_TOOLS_API_BASE/api/dlc/generate?appid=$dlcAppId&base=$baseAppId$game"
     }
 
     internal fun directProviderUrl(sourceName: String, appId: Int): String? {
