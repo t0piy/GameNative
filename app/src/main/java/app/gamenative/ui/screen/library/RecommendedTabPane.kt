@@ -327,7 +327,7 @@ private fun SteamExplorerPane(
                 enabled = steamAvailable && !state.syncState.isSyncing,
                 onClick = onRefresh,
             ) {
-                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
+                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
             }
         }
 
