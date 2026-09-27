@@ -7,6 +7,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,6 +77,60 @@ class SteamManifestOverrideStoreTest {
         val override = SteamManifestOverrideStore.load(context, appId)[481]
         assertEquals(123456789L, override?.manifestId)
         assertEquals(987654L, override?.sizeOnDisk)
+    }
+
+    @Test
+    fun invalidProviderZipDoesNotLeavePartialManifestOverrides() {
+        fun u32(value: Long): ByteArray = byteArrayOf(
+            (value and 0xff).toByte(),
+            ((value shr 8) and 0xff).toByte(),
+            ((value shr 16) and 0xff).toByte(),
+            ((value shr 24) and 0xff).toByte(),
+        )
+        fun varint(value: ULong): ByteArray {
+            var remaining = value
+            val out = mutableListOf<Byte>()
+            do {
+                var next = (remaining and 0x7fuL).toByte()
+                remaining = remaining shr 7
+                if (remaining != 0uL) next = (next.toInt() or 0x80).toByte()
+                out += next
+            } while (remaining != 0uL)
+            return out.toByteArray()
+        }
+
+        val metadata =
+            varint(8uL) + varint(481uL) +
+                varint(16uL) + varint(123456789uL) +
+                varint(40uL) + varint(987654uL)
+        val validManifest =
+            u32(0x71F617D0L) + u32(0) +
+                u32(0x1F4812BEL) + u32(metadata.size.toLong()) + metadata
+
+        val zip = ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { archive ->
+                archive.putNextEntry(ZipEntry("payload/481_123456789.manifest"))
+                archive.write(validManifest)
+                archive.closeEntry()
+
+                archive.putNextEntry(ZipEntry("payload/482_999.manifest"))
+                archive.write("corrupt".toByteArray())
+                archive.closeEntry()
+            }
+            output.toByteArray()
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            SteamManifestOverrideStore.importArtifact(
+                context = context,
+                appId = appId,
+                fileName = "$appId.zip",
+                bytes = zip,
+            )
+        }
+
+        assertFalse(SteamManifestOverrideStore.hasOverrides(context, appId))
+        assertTrue(SteamManifestOverrideStore.load(context, appId).isEmpty())
     }
 
     @Test
