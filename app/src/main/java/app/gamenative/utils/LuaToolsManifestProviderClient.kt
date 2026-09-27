@@ -148,19 +148,14 @@ object LuaToolsManifestProviderClient {
         // endpoints are authoritative enough: 404/invalid content simply falls through to the next
         // provider and eventually to Steam's normal manifest path.
         val sources = directProviderTemplates.keys
-            .sortedWith(
-                compareBy<String> {
-                    val url = directProviderUrl(it, appId).orEmpty()
-                    if (url.startsWith("https://", ignoreCase = true)) 0 else 1
-                }.thenBy(::directProviderPriority),
-            )
+            .filter { sourceName ->
+                val url = directProviderUrl(sourceName, appId).orEmpty()
+                allowCleartextDirect || !url.startsWith("http://", ignoreCase = true)
+            }
+            .sortedBy(::directProviderPriority)
 
         for (sourceName in sources) {
             val url = directProviderUrl(sourceName, appId) ?: continue
-            if (!allowCleartextDirect && url.startsWith("http://", ignoreCase = true)) {
-                continue
-            }
-
             val imported = runCatching {
                 downloadProvider(
                     context = context,
@@ -320,8 +315,8 @@ object LuaToolsManifestProviderClient {
     }
 
     private fun directProviderPriority(sourceName: String): Int = when {
-        sourceName.equals("Sushi", ignoreCase = true) -> 0
-        sourceName.equals("Ryuu", ignoreCase = true) -> 1
+        sourceName.equals("Ryuu", ignoreCase = true) -> 0
+        sourceName.equals("Sushi", ignoreCase = true) -> 1
         else -> 100
     }
 
