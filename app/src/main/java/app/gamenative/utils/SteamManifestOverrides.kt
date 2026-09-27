@@ -9,6 +9,7 @@ import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import org.json.JSONObject
 import timber.log.Timber
 
 /**
@@ -18,6 +19,21 @@ import timber.log.Timber
  * This intentionally carries no depot key, app ticket, token, or other entitlement material.
  * GameNative still asks Steam for the depot key before the native downloader can fetch content.
  */
+enum class ManifestOverrideSourceKind {
+    LocalFile,
+    RemoteUrl,
+    DirectProvider,
+    LuaToolsProvider,
+    Hubcap,
+    Unknown,
+}
+
+data class ManifestOverrideProvenance(
+    val sourceKind: ManifestOverrideSourceKind,
+    val sourceLabel: String,
+    val importedAtEpochMillis: Long = System.currentTimeMillis(),
+)
+
 data class SteamManifestOverride(
     val depotId: Int,
     /**
@@ -26,6 +42,7 @@ data class SteamManifestOverride(
      */
     val manifestId: Long,
     val sizeOnDisk: Long? = null,
+    val provenance: ManifestOverrideProvenance? = null,
 )
 
 /**
@@ -82,6 +99,7 @@ object LuaManifestOverrideParser {
 object SteamManifestOverrideStore {
     private const val DIRECTORY = "steam-manifest-overrides"
     private const val MANIFESTS_DIRECTORY = "manifests"
+    private const val PROVENANCE_DIRECTORY = "provenance"
     private const val PAYLOAD_MAGIC = 0x71F617D0L
     private const val METADATA_MAGIC = 0x1F4812BEL
     private const val EOF_MAGIC = 0x32C415ABL
@@ -100,13 +118,24 @@ object SteamManifestOverrideStore {
     private fun manifestRoot(context: Context, appId: Int): File =
         File(File(root(context), MANIFESTS_DIRECTORY), appId.toString())
 
+    private fun provenanceFile(context: Context, appId: Int): File =
+        File(File(root(context), PROVENANCE_DIRECTORY), "$appId.json")
+
     /**
      * Validate and persist a Lua manifest override file.
      *
      * @return the number of active setManifestid directives imported.
      * @throws IllegalArgumentException when the app id or file contains no usable manifest pins.
      */
-    fun saveLua(context: Context, appId: Int, luaText: String): Int {
+    fun saveLua(
+        context: Context,
+        appId: Int,
+        luaText: String,
+        provenance: ManifestOverrideProvenance = ManifestOverrideProvenance(
+            sourceKind = ManifestOverrideSourceKind.LocalFile,
+            sourceLabel = "Local Lua file",
+        ),
+    ): Int {
         require(appId > 0) { "Invalid Steam app id" }
 
         val parsed = LuaManifestOverrideParser.parse(luaText)
@@ -116,6 +145,12 @@ object SteamManifestOverrideStore {
         check(dir.exists() || dir.mkdirs()) { "Could not create manifest override directory" }
 
         writeAtomically(fileFor(context, appId), luaText.toByteArray(Charsets.UTF_8))
+        recordProvenance(
+            context = context,
+            appId = appId,
+            overrides = parsed.values,
+            provenance = provenance,
+        )
 
         Timber.i(
             "Imported %d manifest override(s) for Steam app %d",
@@ -181,7 +216,21 @@ object SteamManifestOverrideStore {
                 ?.takeIf { it.isNotBlank() }
                 ?: "manifest.lua"
 
-            importArtifact(context, appId, fileName, bytes)
+            val safeUrl = response.request.url.newBuilder()
+                .query(null)
+                .fragment(null)
+                .build()
+                .toString()
+            importArtifact(
+                context = context,
+                appId = appId,
+                fileName = fileName,
+                bytes = bytes,
+                provenance = ManifestOverrideProvenance(
+                    sourceKind = ManifestOverrideSourceKind.RemoteUrl,
+                    sourceLabel = safeUrl,
+                ),
+            )
         }
     }
 
@@ -196,15 +245,19 @@ object SteamManifestOverrideStore {
         appId: Int,
         fileName: String,
         bytes: ByteArray,
+        provenance: ManifestOverrideProvenance = ManifestOverrideProvenance(
+            sourceKind = ManifestOverrideSourceKind.LocalFile,
+            sourceLabel = fileName.ifBlank { "Local file" },
+        ),
     ): Int {
         require(appId > 0) { "Invalid Steam app id" }
         return when {
-            isZip(bytes) -> importZip(context, appId, bytes)
+            isZip(bytes) -> importZip(context, appId, bytes, provenance)
             isRawSteamManifest(bytes) -> {
-                saveManifest(context, appId, fileName, bytes)
+                saveManifest(context, appId, fileName, bytes, provenance)
                 1
             }
-            else -> saveLua(context, appId, bytes.toString(Charsets.UTF_8))
+            else -> saveLua(context, appId, bytes.toString(Charsets.UTF_8), provenance)
         }
     }
 
@@ -212,6 +265,7 @@ object SteamManifestOverrideStore {
         context: Context,
         appId: Int,
         bytes: ByteArray,
+        provenance: ManifestOverrideProvenance,
     ): Int {
         var imported = 0
         var entries = 0
@@ -279,10 +333,12 @@ object SteamManifestOverrideStore {
         }
 
         pendingManifests.forEach { (name, manifestBytes) ->
-            saveManifest(context, appId, name, manifestBytes)
+            saveManifest(context, appId, name, manifestBytes, provenance)
             imported++
         }
-        selectedLuaText?.let { imported += saveLua(context, appId, it) }
+        selectedLuaText?.let {
+            imported += saveLua(context, appId, it, provenance)
+        }
 
         return imported
     }
@@ -305,6 +361,10 @@ object SteamManifestOverrideStore {
         appId: Int,
         fileName: String,
         bytes: ByteArray,
+        provenance: ManifestOverrideProvenance = ManifestOverrideProvenance(
+            sourceKind = ManifestOverrideSourceKind.LocalFile,
+            sourceLabel = fileName.ifBlank { "Local manifest" },
+        ),
     ): SteamManifestOverride {
         require(appId > 0) { "Invalid Steam app id" }
         val override = validateManifest(fileName, bytes)
@@ -317,6 +377,12 @@ object SteamManifestOverrideStore {
         val destination = File(dir, normalizedName)
         writeAtomically(destination, bytes)
         manifestMetadataCache[destination.absolutePath] = destination.lastModified() to override
+        recordProvenance(
+            context = context,
+            appId = appId,
+            overrides = listOf(override),
+            provenance = provenance,
+        )
 
         Timber.i(
             "Imported local manifest override depot=%d gid=%s for Steam app %d",
@@ -331,6 +397,7 @@ object SteamManifestOverrideStore {
         if (appId <= 0) return emptyMap()
 
         val overrides = linkedMapOf<Int, SteamManifestOverride>()
+        val provenance = readProvenance(context, appId)
 
         val luaFile = fileFor(context, appId)
         if (luaFile.isFile) {
@@ -339,7 +406,9 @@ object SteamManifestOverrideStore {
             }.onFailure {
                 Timber.w(it, "Could not read Steam manifest overrides for app %d", appId)
             }.getOrDefault(emptyMap()).forEach { (depotId, override) ->
-                overrides[depotId] = override
+                overrides[depotId] = override.copy(
+                    provenance = provenance[provenanceKey(override)],
+                )
             }
         }
 
@@ -350,7 +419,9 @@ object SteamManifestOverrideStore {
             ?.sortedBy { it.lastModified() }
             ?.forEach { file ->
                 overrideFromManifestFile(file)?.let { override ->
-                    overrides[override.depotId] = override
+                    overrides[override.depotId] = override.copy(
+                        provenance = provenance[provenanceKey(override)],
+                    )
                 }
             }
 
@@ -408,12 +479,90 @@ object SteamManifestOverrideStore {
         val luaFile = fileFor(context, appId)
         if (luaFile.exists() && !luaFile.delete()) success = false
 
+        val provenance = provenanceFile(context, appId)
+        if (provenance.exists() && !provenance.delete()) success = false
+
         val manifests = manifestRoot(context, appId)
         val manifestPrefix = manifests.absolutePath + File.separator
         manifestMetadataCache.keys.removeIf { it.startsWith(manifestPrefix) }
         if (manifests.exists() && !manifests.deleteRecursively()) success = false
 
         return success
+    }
+
+    private fun provenanceKey(override: SteamManifestOverride): String =
+        "${override.depotId}:${java.lang.Long.toUnsignedString(override.manifestId)}"
+
+    private fun readProvenance(
+        context: Context,
+        appId: Int,
+    ): MutableMap<String, ManifestOverrideProvenance> {
+        val file = provenanceFile(context, appId)
+        if (!file.isFile) return linkedMapOf()
+
+        return runCatching {
+            val root = JSONObject(file.readText(Charsets.UTF_8))
+            val entries = root.optJSONObject("entries") ?: JSONObject()
+            buildMap {
+                val keys = entries.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = entries.optJSONObject(key) ?: continue
+                    val kind = runCatching {
+                        ManifestOverrideSourceKind.valueOf(value.optString("kind"))
+                    }.getOrDefault(ManifestOverrideSourceKind.Unknown)
+                    val label = value.optString("label").ifBlank { "Unknown source" }
+                    val importedAt = value.optLong("imported_at", 0L)
+                    put(
+                        key,
+                        ManifestOverrideProvenance(
+                            sourceKind = kind,
+                            sourceLabel = label,
+                            importedAtEpochMillis = importedAt,
+                        ),
+                    )
+                }
+            }.toMutableMap()
+        }.onFailure {
+            Timber.w(it, "Could not read manifest override provenance for app %d", appId)
+        }.getOrDefault(linkedMapOf())
+    }
+
+    private fun recordProvenance(
+        context: Context,
+        appId: Int,
+        overrides: Collection<SteamManifestOverride>,
+        provenance: ManifestOverrideProvenance,
+    ) {
+        if (overrides.isEmpty()) return
+
+        val current = readProvenance(context, appId)
+        overrides.forEach { override ->
+            val depotPrefix = "${override.depotId}:"
+            current.keys.removeIf { it.startsWith(depotPrefix) }
+            current[provenanceKey(override)] = provenance
+        }
+
+        val entries = JSONObject()
+        current.forEach { (key, value) ->
+            entries.put(
+                key,
+                JSONObject()
+                    .put("kind", value.sourceKind.name)
+                    .put("label", value.sourceLabel)
+                    .put("imported_at", value.importedAtEpochMillis),
+            )
+        }
+
+        val destination = provenanceFile(context, appId)
+        writeAtomically(
+            destination,
+            JSONObject()
+                .put("version", 1)
+                .put("entries", entries)
+                .toString()
+                .toByteArray(Charsets.UTF_8),
+        )
     }
 
     private fun validateManifest(
