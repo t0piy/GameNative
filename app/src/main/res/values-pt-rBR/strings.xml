@@ -2610,6 +2610,7 @@
     <string name="explorer_steam_sort">Ordenar por</string>
     <string name="explorer_steam_price_discount">Preço, descontos e eventos</string>
     <string name="explorer_steam_max_price">Preço máximo</string>
+    <string name="explorer_steam_free_only">Somente produtos gratuitos</string>
     <string name="explorer_steam_specials_only">Somente promoções e itens com desconto</string>
     <string name="explorer_steam_hide_f2p">Ocultar itens gratuitos</string>
     <string name="explorer_steam_filter_search">Buscar filtro, tag, idioma, recurso…</string>
