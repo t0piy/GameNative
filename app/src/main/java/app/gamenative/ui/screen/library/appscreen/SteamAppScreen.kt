@@ -1903,29 +1903,62 @@ class SteamAppScreen : BaseAppScreen() {
                             ConversionTracker.campaignAttribution(gameId),
                     )
                     CoroutineScope(Dispatchers.IO).launch {
-                        if (installedApp == null && PrefManager.manifestFastFetch) {
+                        if (PrefManager.manifestFastFetch) {
                             SnackbarManager.show(
                                 context.getString(R.string.manifest_fast_fetch_checking),
                             )
-                            val fastFetch = runCatching {
-                                LuaToolsManifestProviderClient.fastFetch(
-                                    context = context,
-                                    appId = gameId,
-                                    gameName = appInfo?.name ?: libraryItem.name,
-                                    allowCleartextDirect =
-                                        PrefManager.manifestFastFetchAllowCleartext,
-                                )
-                            }.onFailure {
-                                // Provider discovery/import is optional. A failure here must never
-                                // prevent the normal Steam installation from starting.
-                                Timber.w(it, "Manifest FastFetch failed for app $gameId")
-                            }.getOrNull()
 
-                            if (fastFetch != null) {
+                            val targets = buildList {
+                                if (installedApp == null) add(gameId)
+                                addAll(
+                                    dlcAppIds
+                                        .asSequence()
+                                        .filter { it > 0 && it != gameId }
+                                        .distinct()
+                                        .toList(),
+                                )
+                            }
+
+                            val usedSources = mutableListOf<String>()
+                            for (targetAppId in targets) {
+                                val targetName = if (targetAppId == gameId) {
+                                    appInfo?.name ?: libraryItem.name
+                                } else {
+                                    SteamService.getAppInfoOf(targetAppId)?.name
+                                        ?: "DLC $targetAppId"
+                                }
+
+                                val fastFetch = runCatching {
+                                    LuaToolsManifestProviderClient.fastFetch(
+                                        context = context,
+                                        appId = targetAppId,
+                                        gameName = targetName,
+                                        allowCleartextDirect =
+                                            PrefManager.manifestFastFetchAllowCleartext,
+                                    )
+                                }.onFailure {
+                                    // Optional metadata fetch: Steam remains the fallback.
+                                    Timber.w(
+                                        it,
+                                        "Manifest FastFetch failed for app $targetAppId " +
+                                            "(parent $gameId)",
+                                    )
+                                }.getOrNull()
+
+                                if (fastFetch != null) {
+                                    usedSources += if (targetAppId == gameId) {
+                                        fastFetch.sourceName
+                                    } else {
+                                        "${fastFetch.sourceName} (DLC $targetAppId)"
+                                    }
+                                }
+                            }
+
+                            if (usedSources.isNotEmpty()) {
                                 SnackbarManager.show(
                                     context.getString(
                                         R.string.manifest_fast_fetch_used,
-                                        fastFetch.sourceName,
+                                        usedSources.joinToString(", "),
                                     ),
                                 )
                             }
