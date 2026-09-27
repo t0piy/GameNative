@@ -3,10 +3,14 @@ package app.gamenative.db.dao
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import app.gamenative.data.DepotInfo
+import app.gamenative.data.ManifestInfo
 import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamLicense
 import app.gamenative.db.PluviaDatabase
 import app.gamenative.enums.AppType
+import app.gamenative.enums.OS
+import app.gamenative.enums.OSArch
 import app.gamenative.service.SteamService.Companion.INVALID_PKG_ID
 import `in`.dragonbra.javasteam.enums.ELicenseFlags
 import `in`.dragonbra.javasteam.enums.ELicenseType
@@ -69,6 +73,45 @@ class SteamAppDaoTest {
 
     private fun makeApp(id: Int, packageId: Int, type: AppType = AppType.game) =
         SteamApp(id = id, packageId = packageId, type = type, name = "App $id")
+
+    @Test
+    fun `catalog DLC query returns public DLC without a license`() = runBlocking {
+        val depot = DepotInfo(
+            depotId = 200,
+            dlcAppId = 2,
+            depotFromApp = 2,
+            sharedInstall = false,
+            osList = EnumSet.of(OS.windows),
+            osArch = OSArch.Arch64,
+            manifests = mapOf(
+                "public" to ManifestInfo(
+                    name = "public",
+                    gid = 123L,
+                    size = 1000L,
+                    download = 800L,
+                ),
+            ),
+            encryptedManifests = emptyMap(),
+        )
+        appDao.insert(
+            SteamApp(
+                id = 2,
+                packageId = INVALID_PKG_ID,
+                type = AppType.dlc,
+                name = "Public DLC",
+                dlcForAppId = 1,
+                depots = mapOf(depot.depotId to depot),
+            ),
+        )
+
+        assertTrue("no license row should exist", licenseDao.getAllLicenses().isEmpty())
+
+        val catalog = appDao.findCatalogDLCApps(1).orEmpty()
+        assertEquals(listOf(2), catalog.map { it.id })
+
+        val owned = appDao.findDownloadableDLCApps(1).orEmpty()
+        assertTrue("owned-DLC query remains license gated", owned.isEmpty())
+    }
 
     @Test
     fun `valid license - app appears in library`() = runBlocking {
