@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONObject
+import timber.log.Timber
 
 enum class LuaToolsProviderTransport {
     Direct,
@@ -115,6 +116,76 @@ object LuaToolsManifestProviderClient {
                 compareByDescending<LuaToolsManifestSource> { it.requiresUserKey }
                     .thenBy { it.displayName.lowercase() },
             )
+    }
+
+    data class FastFetchResult(
+        val sourceName: String,
+        val importedCount: Int,
+    )
+
+    /**
+     * Best-effort FastFetch for a fresh GameNative install.
+     *
+     * Existing manual overrides always win: if the user already imported/pinned anything for this
+     * app, this returns null without contacting providers. Only keyless DIRECT providers participate;
+     * authenticated lua.tools/Hubcap transports are never invoked implicitly.
+     *
+     * HTTPS direct providers are preferred. Ryuu's upstream fallback is cleartext HTTP, so it is
+     * eligible only when [allowCleartextDirect] is explicitly true.
+     */
+    suspend fun fastFetchDirect(
+        context: Context,
+        appId: Int,
+        gameName: String? = null,
+        allowCleartextDirect: Boolean = false,
+    ): FastFetchResult? = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+        if (SteamManifestOverrideStore.hasOverrides(context, appId)) {
+            return@withContext null
+        }
+
+        val sources = checkSources(appId)
+            .filter { it.available && it.transport == LuaToolsProviderTransport.Direct }
+            .sortedWith(
+                compareBy<LuaToolsManifestSource> {
+                    val url = directProviderUrl(it.name, appId).orEmpty()
+                    if (url.startsWith("https://", ignoreCase = true)) 0 else 1
+                }.thenBy {
+                    directProviderPriority(it.name)
+                },
+            )
+
+        for (source in sources) {
+            val url = directProviderUrl(source.name, appId) ?: continue
+            if (!allowCleartextDirect && url.startsWith("http://", ignoreCase = true)) {
+                continue
+            }
+
+            val imported = runCatching {
+                downloadProvider(
+                    context = context,
+                    appId = appId,
+                    sourceName = source.name,
+                    gameName = gameName,
+                )
+            }.onFailure {
+                Timber.w(
+                    it,
+                    "FastFetch provider failed app=%d source=%s",
+                    appId,
+                    source.name,
+                )
+            }.getOrNull() ?: continue
+
+            if (imported > 0) {
+                return@withContext FastFetchResult(
+                    sourceName = source.name,
+                    importedCount = imported,
+                )
+            }
+        }
+
+        null
     }
 
     /**
@@ -246,6 +317,12 @@ object LuaToolsManifestProviderClient {
             }
             return output.toByteArray()
         }
+    }
+
+    private fun directProviderPriority(sourceName: String): Int = when {
+        sourceName.equals("Sushi", ignoreCase = true) -> 0
+        sourceName.equals("Ryuu", ignoreCase = true) -> 1
+        else -> 100
     }
 
     internal fun directProviderUrl(sourceName: String, appId: Int): String? {
