@@ -1519,8 +1519,19 @@ class SteamAppScreen : BaseAppScreen() {
                     AppOptionMenuType.ClearManifestOverrides,
                     onClick = {
                         scope.launch {
-                            val namespacesToClear = manifestTargetAppIds.toList()
                             val cleared = withContext(Dispatchers.IO) {
+                                val depots = SteamService.getDownloadableDepots(gameId)
+                                val namespacesToClear = buildSet {
+                                    add(gameId)
+                                    depots.values.forEach { depot ->
+                                        if (
+                                            depot.dlcAppId != SteamService.INVALID_APP_ID &&
+                                            depot.dlcAppId > 0
+                                        ) {
+                                            add(depot.dlcAppId)
+                                        }
+                                    }
+                                }
                                 namespacesToClear.all { namespaceAppId ->
                                     SteamManifestOverrideStore.clear(context, namespaceAppId)
                                 }
