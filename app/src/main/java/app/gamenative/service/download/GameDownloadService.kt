@@ -68,6 +68,14 @@ object GameDownloadService {
     /** Thrown when a native download run finishes with `success = false` (not a cancel). */
     class DownloadFailedException(message: String) : Exception(message)
 
+    internal fun unresolvedSelectedDepotIds(
+        selectedDepotIds: Collection<Int>,
+        completedDepotIds: Set<Int>,
+    ): List<Int> = selectedDepotIds
+        .filterNot { it in completedDepotIds }
+        .distinct()
+        .sorted()
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Steam
     // ─────────────────────────────────────────────────────────────────────────────
@@ -77,12 +85,11 @@ object GameDownloadService {
      * [installDir], reporting progress into [downloadInfo] exactly like the old
      * `DepotDownloader` listener did (per-depot delta bytes + per-depot fraction).
      *
-     * Depots Steam refuses to serve (no manifest gid for the branch, depot key denied —
-     * e.g. a DLC the account doesn't own) are skipped, not fatal.
+     * Depots that cannot be resolved to a manifest/key are omitted from the native plan.
      *
-     * Returns the ids of the depots that were actually downloaded, so the caller only
-     * marks those complete (a skipped depot must NOT be recorded as downloaded — it
-     * would be filtered out as "already downloaded" forever after).
+     * Returns the ids of depots admitted to the native plan after that plan completes
+     * successfully (including depots the native journal already considers installed).
+     * The caller must compare this set with its selected depots before marking the app complete.
      * Throws [DownloadFailedException] when not a single depot was servable, and
      * [kotlinx.coroutines.CancellationException] when the calling job is cancelled.
      */
@@ -98,7 +105,7 @@ object GameDownloadService {
         maxWorkers: Int,
         processWorkers: Int,
         parentScope: CoroutineScope,
-    ) {
+    ): Set<Int> {
         val steamClient = SteamService.instance?.steamClient
             ?: throw DownloadFailedException("Steam client not available")
         val steamApps = steamClient.getHandler(SteamApps::class.java)
@@ -202,6 +209,20 @@ object GameDownloadService {
             }.awaitAll()
         }.filterNotNull()
 
+        // Resolution is all-or-nothing for a selected install plan. Starting the native engine
+        // with only the small/shared depots makes a failed game install consume bandwidth and can
+        // leave a misleading partial state. Resolve every selected depot first, then transfer.
+        val unresolvedDepotIds = unresolvedSelectedDepotIds(
+            selectedDepotIds = selectedDepots.keys,
+            completedDepotIds = resolvedDepots.mapTo(linkedSetOf()) { it.depotId },
+        )
+        if (unresolvedDepotIds.isNotEmpty()) {
+            throw DownloadFailedException(
+                "Steam did not authorize or resolve required depot(s): " +
+                    unresolvedDepotIds.joinToString(", "),
+            )
+        }
+
         // A directly imported .manifest is staged only after resolveDepotForDownload() has
         // successfully obtained the depot key from Steam. The Rust engine then validates the
         // manifest's own depot/GID metadata before trusting the cache.
@@ -287,6 +308,8 @@ object GameDownloadService {
                 resolved.depotKey,
             )
         }
+
+        return resolvedDepotIds.toSet()
     }
 
     private suspend fun runNativeSteamDownload(

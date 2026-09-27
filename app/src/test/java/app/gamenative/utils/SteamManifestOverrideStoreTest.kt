@@ -81,6 +81,77 @@ class SteamManifestOverrideStoreTest {
     }
 
     @Test
+    fun sushiStyleZipWithBackslashPathsImportsManifestMetadata() {
+        fun u32(value: Long): ByteArray = byteArrayOf(
+            (value and 0xff).toByte(),
+            ((value shr 8) and 0xff).toByte(),
+            ((value shr 16) and 0xff).toByte(),
+            ((value shr 24) and 0xff).toByte(),
+        )
+        fun varint(value: ULong): ByteArray {
+            var remaining = value
+            val out = mutableListOf<Byte>()
+            do {
+                var b = (remaining and 0x7fu).toInt()
+                remaining = remaining shr 7
+                if (remaining != 0uL) b = b or 0x80
+                out += b.toByte()
+            } while (remaining != 0uL)
+            return out.toByteArray()
+        }
+
+        val depotId = 481
+        val manifestId = 123456789UL
+        val sizeOnDisk = 987654UL
+        val metadata =
+            varint(8uL) + varint(depotId.toULong()) +
+                varint(16uL) + varint(manifestId) +
+                varint(40uL) + varint(sizeOnDisk)
+        val rawManifest =
+            u32(0x71F617D0L) + u32(0) +
+                u32(0x1F4812BEL) + u32(metadata.size.toLong()) + metadata +
+                u32(0x32C415ABL)
+
+        val zip = ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { archive ->
+                archive.putNextEntry(ZipEntry("$appId\\$appId.lua"))
+                archive.write(
+                    (
+                        "addappid($appId)\r\n" +
+                            "addappid($depotId,1,\"synthetic-provider-value\")\r\n" +
+                            "setManifestid($depotId,\"$manifestId\",$sizeOnDisk)\r\n"
+                    ).toByteArray(),
+                )
+                archive.closeEntry()
+
+                archive.putNextEntry(
+                    ZipEntry("$appId\\${depotId}_${manifestId}.manifest"),
+                )
+                archive.write(rawManifest)
+                archive.closeEntry()
+            }
+            output.toByteArray()
+        }
+
+        val imported = SteamManifestOverrideStore.importArtifact(
+            context = context,
+            appId = appId,
+            fileName = "$appId.zip",
+            bytes = zip,
+            provenance = ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.DirectProvider,
+                sourceLabel = "Sushi",
+            ),
+        )
+
+        assertEquals(1, imported)
+        val override = SteamManifestOverrideStore.load(context, appId)[depotId]
+        assertEquals(manifestId.toString(), override?.manifestId?.let(java.lang.Long::toUnsignedString))
+        assertEquals(sizeOnDisk.toLong(), override?.sizeOnDisk)
+        assertEquals("Sushi", override?.provenance?.sourceLabel)
+    }
+
+    @Test
     fun invalidProviderZipDoesNotLeavePartialManifestOverrides() {
         fun u32(value: Long): ByteArray = byteArrayOf(
             (value and 0xff).toByte(),
