@@ -1489,8 +1489,9 @@ class SteamAppScreen : BaseAppScreen() {
                     val branch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
                     val manifestOverrides = SteamManifestOverrideStore.load(context, gameId)
                     val availableBytes = StorageUtils.getAvailableSpaceForUncreatedPath(SteamService.getAppDirPath(gameId))
-                    val downloadBytes = depots.values.sumOf {
-                        SteamUtils.getDownloadBytes(it.manifests[branch])
+                    val downloadBytes = depots.values.sumOf { depot ->
+                        manifestOverrides[depot.depotId]?.sizeOnDisk
+                            ?: SteamUtils.getDownloadBytes(depot.manifests[branch])
                     }
                     val installBytes = depots.values.sumOf { depot ->
                         manifestOverrides[depot.depotId]?.sizeOnDisk
