@@ -2681,4 +2681,8 @@
     <string name="manifest_overrides_import_failed">Could not import manifest overrides: %1$s</string>
     <string name="manifest_overrides_cleared">Manifest overrides removed.</string>
     <string name="manifest_overrides_clear_failed">Could not remove manifest overrides.</string>
+    <string name="option_import_manifest_url">Import manifest from URL</string>
+    <string name="manifest_url_title">Import manifest source</string>
+    <string name="manifest_url_label">HTTPS URL to a Lua or .manifest file</string>
+    <string name="manifest_url_import">Import</string>
 </resources>
