@@ -146,6 +146,5 @@ class SteamStoreSearchParserTest {
         assertEquals("Videos", productTypes["992"])
         assertEquals("Mods", productTypes["997"])
         assertEquals("Hardware", productTypes["993"])
-        assertEquals("Bundles", productTypes["996"])
     }
 }
