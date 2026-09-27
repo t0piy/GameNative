@@ -24,6 +24,9 @@ data class LuaToolsManifestSource(
 ) {
     val available: Boolean
         get() = status.equals("available", ignoreCase = true)
+
+    val canAttemptDownload: Boolean
+        get() = transport == LuaToolsProviderTransport.Direct || available
 }
 
 /**
@@ -89,6 +92,10 @@ object LuaToolsManifestProviderClient {
                     statuses[name] = json.optString(name, "unknown")
                 }
             }
+        }
+
+        directProviderTemplates.keys.forEach { sourceName ->
+            statuses.putIfAbsent(sourceName, "unknown")
         }
 
         val hubcapStatus = if (hubcapApiKey.isNullOrBlank()) {
