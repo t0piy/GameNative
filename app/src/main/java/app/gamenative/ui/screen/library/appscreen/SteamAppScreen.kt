@@ -821,6 +821,7 @@ class SteamAppScreen : BaseAppScreen() {
         return SteamSaveTransfer.importSaves(context, container, libraryItem.gameId, uri)
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun getSourceSpecificMenuOptions(
         context: Context,
@@ -835,12 +836,48 @@ class SteamAppScreen : BaseAppScreen() {
         val appInfo = SteamService.getAppInfoOf(gameId) ?: return emptyList()
         val isDownloadInProgress = SteamService.getDownloadingAppInfoOf(gameId) != null
         val scope = rememberCoroutineScope()
+        var manifestTargetAppIds by remember(gameId) { mutableStateOf(listOf(gameId)) }
+        var selectedManifestTargetAppId by remember(gameId) { mutableIntStateOf(gameId) }
         var hasManifestOverrides by remember(gameId) {
             mutableStateOf(SteamManifestOverrideStore.hasOverrides(context, gameId))
         }
+
+        fun manifestTargetLabel(targetAppId: Int): String {
+            if (targetAppId == gameId) {
+                return context.getString(R.string.manifest_target_base, gameId)
+            }
+            val name = SteamService.getAppInfoOf(targetAppId)?.name
+                ?.takeIf { it.isNotBlank() }
+                ?: "DLC"
+            return context.getString(
+                R.string.manifest_target_dlc,
+                name,
+                targetAppId,
+            )
+        }
+
         LaunchedEffect(gameId, isDownloadInProgress) {
+            val targets = withContext(Dispatchers.IO) {
+                val depots = SteamService.getDownloadableDepots(gameId)
+                buildList {
+                    add(gameId)
+                    addAll(
+                        depots.values
+                            .asSequence()
+                            .map { it.dlcAppId }
+                            .filter { it != SteamService.INVALID_APP_ID && it > 0 && it != gameId }
+                            .distinct()
+                            .sorted()
+                            .toList(),
+                    )
+                }
+            }
+            manifestTargetAppIds = targets
+            if (selectedManifestTargetAppId !in targets) {
+                selectedManifestTargetAppId = gameId
+            }
             hasManifestOverrides = withContext(Dispatchers.IO) {
-                SteamManifestOverrideStore.hasOverrides(context, gameId)
+                targets.any { SteamManifestOverrideStore.hasOverrides(context, it) }
             }
         }
         var showManifestOverridesDialog by remember(gameId) { mutableStateOf(false) }
