@@ -12,6 +12,7 @@ import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.LibraryPlayHistoryDao
 import app.gamenative.db.dao.ModDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
+import app.gamenative.db.dao.SteamCatalogDao
 import app.gamenative.db.migration.ROOM_MIGRATION_V23_to_V24
 import app.gamenative.db.migration.ROOM_MIGRATION_V24_to_V25
 import app.gamenative.db.migration.ROOM_MIGRATION_V26_to_V27
@@ -47,6 +48,10 @@ class DatabaseModule {
     @Provides
     @Singleton
     fun provideSteamAppDao(db: PluviaDatabase) = db.steamAppDao()
+
+    @Provides
+    @Singleton
+    fun provideSteamCatalogDao(db: PluviaDatabase): SteamCatalogDao = db.steamCatalogDao()
 
     @Provides
     @Singleton
