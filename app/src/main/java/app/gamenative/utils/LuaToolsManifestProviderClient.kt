@@ -325,10 +325,7 @@ object LuaToolsManifestProviderClient {
         val bearer = ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
         val unsignedManifestId = java.lang.Long.toUnsignedString(manifestId)
         val request = Request.Builder()
-            .url(
-                "$LUA_TOOLS_API_BASE/api/givemethemanifestpunk/" +
-                    "$depotId/$unsignedManifestId",
-            )
+            .url(luaToolsDepotManifestUrl(depotId, manifestId))
             .header("Authorization", "Bearer $bearer")
             .get()
             .build()
@@ -586,6 +583,16 @@ object LuaToolsManifestProviderClient {
         sourceName.equals("Ryuu", ignoreCase = true) -> 0
         sourceName.equals("Sushi", ignoreCase = true) -> 1
         else -> 100
+    }
+
+    internal fun luaToolsDepotManifestUrl(
+        depotId: Int,
+        manifestId: Long,
+    ): String {
+        require(depotId > 0) { "Invalid depot id" }
+        require(manifestId != 0L) { "Invalid manifest id" }
+        return "$LUA_TOOLS_API_BASE/api/givemethemanifestpunk/" +
+            "$depotId/${java.lang.Long.toUnsignedString(manifestId)}"
     }
 
     internal fun luaToolsDlcGenerateUrl(
