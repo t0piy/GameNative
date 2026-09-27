@@ -132,6 +132,7 @@ class ManifestProviderCredentialStore(context: Context) {
 }
 
 object ManifestProviderAuthManager {
+    private const val LUA_TOOLS_API_BASE = "https://lua.tools"
     private const val SUPABASE_URL = "https://db.lua.tools"
 
     // Public Supabase anonymous client key. This value is compiled into LuaTools itself and is not
@@ -200,6 +201,60 @@ object ManifestProviderAuthManager {
         ManifestProviderCredentialStore(context).clear()
     }
 
+    suspend fun signInWithLuaToolsCode(
+        context: Context,
+        code: String,
+    ): LuaToolsProviderSession = withContext(Dispatchers.IO) {
+        val normalized = code.trim().uppercase()
+        require(normalized.length == 6) { "lua.tools login code must be 6 characters" }
+
+        val redeemBody = JSONObject()
+            .put("code", normalized)
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        val redeemRequest = Request.Builder()
+            .url("$LUA_TOOLS_API_BASE/api/auth/code/redeem")
+            .post(redeemBody)
+            .build()
+
+        val tokenHash = Net.http.newCall(redeemRequest).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            check(response.isSuccessful) {
+                when (response.code) {
+                    404 -> "lua.tools login code is invalid"
+                    410 -> "lua.tools login code has expired"
+                    else -> "lua.tools login failed with HTTP ${response.code}"
+                }
+            }
+            JSONObject(body).optString("token").takeIf { it.isNotBlank() }
+                ?: error("lua.tools login returned no verification token")
+        }
+
+        val verifyBody = JSONObject()
+            .put("type", "magiclink")
+            .put("token_hash", tokenHash)
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        val verifyRequest = Request.Builder()
+            .url("$SUPABASE_URL/auth/v1/verify")
+            .header("apikey", SUPABASE_ANON_KEY)
+            .post(verifyBody)
+            .build()
+
+        val session = Net.http.newCall(verifyRequest).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            check(response.isSuccessful) {
+                "lua.tools session verification failed with HTTP ${response.code}"
+            }
+            sessionFromSupabaseJson(JSONObject(body))
+        }
+
+        val store = ManifestProviderCredentialStore(context)
+        val existing = store.read()
+        store.write(existing.copy(luaToolsSession = session))
+        session
+    }
+
     suspend fun getValidLuaToolsAccessToken(context: Context): String =
         refreshMutex.withLock {
             val store = ManifestProviderCredentialStore(context)
@@ -243,24 +298,33 @@ object ManifestProviderAuthManager {
                     "lua.tools session refresh failed with HTTP ${response.code}"
                 }
 
-                val json = JSONObject(body)
-                val access = json.optString("access_token")
-                val refresh = json.optString("refresh_token").ifBlank { refreshToken }
-                val expiresIn = json.optLong("expires_in", 0L)
-                require(access.isNotBlank()) { "lua.tools refresh returned no access token" }
-
-                val jwtExpiry = jwtExpiryEpochSeconds(access)
-                val expiresAt = jwtExpiry
-                    ?: (System.currentTimeMillis() / 1000L + expiresIn).takeIf { expiresIn > 0L }
-                    ?: error("lua.tools refresh returned no token expiry")
-
-                LuaToolsProviderSession(
-                    accessToken = access,
-                    refreshToken = refresh,
-                    expiresAtEpochSeconds = expiresAt,
+                sessionFromSupabaseJson(
+                    json = JSONObject(body),
+                    fallbackRefreshToken = refreshToken,
                 )
             }
         }
+
+    private fun sessionFromSupabaseJson(
+        json: JSONObject,
+        fallbackRefreshToken: String = "",
+    ): LuaToolsProviderSession {
+        val access = json.optString("access_token")
+        val refresh = json.optString("refresh_token").ifBlank { fallbackRefreshToken }
+        val expiresIn = json.optLong("expires_in", 0L)
+        require(access.isNotBlank()) { "lua.tools response returned no access token" }
+
+        val jwtExpiry = jwtExpiryEpochSeconds(access)
+        val expiresAt = jwtExpiry
+            ?: (System.currentTimeMillis() / 1000L + expiresIn).takeIf { expiresIn > 0L }
+            ?: error("lua.tools response returned no token expiry")
+
+        return LuaToolsProviderSession(
+            accessToken = access,
+            refreshToken = refresh,
+            expiresAtEpochSeconds = expiresAt,
+        )
+    }
 
     internal fun isValidHubcapKeyFormat(key: String): Boolean =
         Regex("""^smm_[0-9a-f]{96}$""").matches(key)
