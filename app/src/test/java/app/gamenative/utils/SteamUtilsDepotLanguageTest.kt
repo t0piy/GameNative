@@ -181,12 +181,12 @@ class SteamUtilsDepotLanguageTest {
     }
 
     @Test
-    fun `unlicensed base-game language is ignored`() {
+    fun `license state does not change public depot language resolution`() {
         val depots = depotsOf(
             depot(depotId = 100, language = "french"),
             depot(depotId = 101, language = "english"),
         )
-        assertEquals("english", resolve(depots, "french", licensedDepotIds = setOf(101)))
+        assertEquals("french", resolve(depots, "french", licensedDepotIds = setOf(101)))
     }
 
     // -- No installable tagged depot at all --
