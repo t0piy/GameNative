@@ -132,23 +132,41 @@ object SteamStoreSearchParser {
                     val results = buildList {
                         for (index in 0 until items.length()) {
                             val item = items.optJSONObject(index) ?: continue
-                            val id = item.optInt("id", 0)
                             val name = decodeHtml(item.optString("name")).trim()
-                            if (id <= 0 || name.isBlank()) continue
-                            val url = "https://store.steampowered.com/app/$id/"
+                            val logo = decodeHtml(item.optString("logo")).trim()
+                            if (name.isBlank()) continue
+
+                            val explicitId = item.optInt("id", 0).takeIf { it > 0 }
+                            val explicitType = item.optString("type").lowercase()
+                            val inferred = kindAndIdFromAsset(logo)
+                            val kind = when {
+                                explicitType == "bundle" -> SteamStoreItemKind.BUNDLE
+                                explicitType == "sub" || explicitType == "package" -> SteamStoreItemKind.PACKAGE
+                                explicitType == "app" -> SteamStoreItemKind.APP
+                                inferred.second != null -> inferred.first
+                                explicitId != null -> SteamStoreItemKind.APP
+                                else -> SteamStoreItemKind.OTHER
+                            }
+                            val id = explicitId ?: inferred.second
+                            if (id == null) continue
+
+                            val url = storeUrl(kind, id)
                             add(
                                 SteamStoreSearchResult(
-                                    key = "APP:$id",
-                                    kind = SteamStoreItemKind.APP,
+                                    key = "${kind.name}:$id",
+                                    kind = kind,
                                     itemId = id,
                                     name = name,
                                     storeUrl = url,
-                                    imageUrl = item.optString("logo"),
+                                    imageUrl = logo,
                                 ),
                             )
                         }
                     }
-                    return SearchPage(results, json.optInt("total", results.size))
+                    return SearchPage(
+                        results = results.distinctBy { it.key },
+                        totalCount = json.optInt("total_count", json.optInt("total", results.size)),
+                    )
                 }
             }
         }
@@ -205,6 +223,29 @@ object SteamStoreSearchParser {
         return decodeHtml(raw.replace(Regex("<[^>]+>"), " "))
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    private fun kindAndIdFromAsset(url: String): Pair<SteamStoreItemKind, Int?> {
+        Regex("""/(?:steam/)?apps/(\d+)(?:/|$)""", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let {
+                return SteamStoreItemKind.APP to it
+            }
+        Regex("""/(?:steam/)?bundles/(\d+)(?:/|$)""", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let {
+                return SteamStoreItemKind.BUNDLE to it
+            }
+        Regex("""/(?:steam/)?subs/(\d+)(?:/|$)""", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let {
+                return SteamStoreItemKind.PACKAGE to it
+            }
+        return SteamStoreItemKind.OTHER to null
+    }
+
+    private fun storeUrl(kind: SteamStoreItemKind, id: Int): String = when (kind) {
+        SteamStoreItemKind.APP -> "https://store.steampowered.com/app/$id/"
+        SteamStoreItemKind.BUNDLE -> "https://store.steampowered.com/bundle/$id/"
+        SteamStoreItemKind.PACKAGE -> "https://store.steampowered.com/sub/$id/"
+        SteamStoreItemKind.OTHER -> "https://store.steampowered.com/"
     }
 
     private fun kindAndId(url: String): Pair<SteamStoreItemKind, Int?> {
