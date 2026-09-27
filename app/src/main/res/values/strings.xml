@@ -2762,6 +2762,7 @@
     <string name="explorer_steam_sort">Sort by</string>
     <string name="explorer_steam_price_discount">Price, discounts &amp; events</string>
     <string name="explorer_steam_max_price">Maximum price</string>
+    <string name="explorer_steam_free_only">Free products only</string>
     <string name="explorer_steam_specials_only">Specials and discounted items only</string>
     <string name="explorer_steam_hide_f2p">Hide free-to-play items</string>
     <string name="explorer_steam_filter_search">Find a filter, tag, language, feature…</string>
