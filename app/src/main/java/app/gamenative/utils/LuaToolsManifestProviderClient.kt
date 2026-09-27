@@ -67,6 +67,15 @@ object LuaToolsManifestProviderClient {
     )
 
     suspend fun checkSources(
+        context: Context,
+        appId: Int,
+    ): List<LuaToolsManifestSource> =
+        checkSources(
+            appId = appId,
+            hubcapApiKey = ManifestProviderAuthManager.getHubcapApiKey(context),
+        )
+
+    suspend fun checkSources(
         appId: Int,
         hubcapApiKey: String? = null,
     ): List<LuaToolsManifestSource> = withContext(Dispatchers.IO) {
@@ -212,8 +221,11 @@ object LuaToolsManifestProviderClient {
 
         when {
             sourceName.equals(HUBCAP_SOURCE_NAME, ignoreCase = true) -> {
-                require(!hubcapApiKey.isNullOrBlank()) { "Hubcap API key is required" }
-                downloadHubcap(context, appId, hubcapApiKey)
+                val key = hubcapApiKey
+                    ?.takeIf { it.isNotBlank() }
+                    ?: ManifestProviderAuthManager.getHubcapApiKey(context)
+                    ?: throw IllegalStateException("Hubcap API key is required")
+                downloadHubcap(context, appId, key)
             }
 
             directProviderUrl(sourceName, appId) != null -> {
@@ -229,9 +241,9 @@ object LuaToolsManifestProviderClient {
             }
 
             else -> {
-                require(!luaToolsBearerToken.isNullOrBlank()) {
-                    "lua.tools sign-in is required for provider $sourceName"
-                }
+                val bearer = luaToolsBearerToken
+                    ?.takeIf { it.isNotBlank() }
+                    ?: ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
                 val source = encode(sourceName)
                 val game = gameName
                     ?.takeIf { it.isNotBlank() }
@@ -241,7 +253,7 @@ object LuaToolsManifestProviderClient {
                     "$LUA_TOOLS_API_BASE/api/manifest/download?appid=$appId&source=$source$game"
                 val request = Request.Builder()
                     .url(url)
-                    .header("Authorization", "Bearer $luaToolsBearerToken")
+                    .header("Authorization", "Bearer $bearer")
                     .get()
                     .build()
 
