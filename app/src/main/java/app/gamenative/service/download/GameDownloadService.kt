@@ -127,11 +127,15 @@ object GameDownloadService {
         SteamService.instance?.applicationContext?.let { context ->
             withContext(Dispatchers.IO) {
                 for (resolved in resolvedDepots) {
+                    val depot = selectedDepots[resolved.depotId] ?: continue
                     if (
-                        SteamManifestOverrideStore.stageLocalManifest(
+                        SteamManifestOverrideStore.stageLocalManifestForDepot(
                             context = context,
-                            appId = appId,
+                            parentAppId = appId,
                             depotId = resolved.depotId,
+                            dlcAppId = depot.dlcAppId,
+                            depotFromApp = depot.depotFromApp,
+                            invalidAppId = SteamService.INVALID_APP_ID,
                             manifestId = resolved.gid,
                             installDir = installDir,
                         )
@@ -524,10 +528,24 @@ object GameDownloadService {
         // Entitlement is still enforced immediately afterwards by getDepotDecryptionKey(),
         // so an override cannot grant access to a depot the Steam account does not own.
         SteamService.instance?.applicationContext?.let { context ->
-            SteamManifestOverrideStore.find(context, appId, depotId)?.let { override ->
+            SteamManifestOverrideStore.findForDepot(
+                context = context,
+                parentAppId = appId,
+                depotId = depotId,
+                dlcAppId = depot.dlcAppId,
+                depotFromApp = depot.depotFromApp,
+                invalidAppId = SteamService.INVALID_APP_ID,
+            )?.let { override ->
+                val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                    parentAppId = appId,
+                    dlcAppId = depot.dlcAppId,
+                    depotFromApp = depot.depotFromApp,
+                    invalidAppId = SteamService.INVALID_APP_ID,
+                )
                 Timber.tag(TAG).i(
-                    "Depot $depotId: using imported manifest override %s for app %d",
+                    "Depot $depotId: using imported manifest override %s (owner app %d, parent %d)",
                     java.lang.Long.toUnsignedString(override.manifestId),
+                    ownerAppId,
                     appId,
                 )
                 return override.manifestId
