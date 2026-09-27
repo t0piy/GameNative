@@ -1358,6 +1358,15 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         /**
+         * DLC rows known from public PICS/catalog metadata, regardless of account ownership.
+         * Use this for metadata/depot discovery. Ownership-specific library features should keep
+         * using [getDownloadableDlcAppsOf] or the explicit owned-DLC helpers.
+         */
+        fun getCatalogDlcAppsOf(appId: Int): List<SteamApp>? {
+            return runBlocking(Dispatchers.IO) { instance?.appDao?.findCatalogDLCApps(appId) }
+        }
+
+        /**
          * Java-friendly accessor for the AppIDs of every DLC the current
          * user owns for [appId]. Combines the visible (depot-bearing) and
          * hidden DLC sets returned by [SteamAppDao]; both are licence-gated
@@ -1593,10 +1602,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                 else -> false
             }
             if (!archOk) return false
-            // 4. DLC you actually own
-            if (depot.dlcAppId != INVALID_APP_ID && ownedDlc != null && !ownedDlc.containsKey(depot.depotId))
-                return false
-            // 5. Language filter - if depot has language, it must match preferred language
+            // Ownership is intentionally not checked here. This function resolves public depot
+            // metadata; Steam's depot-key/content request remains the authorization boundary.
+            // 4. Language filter - if depot has language, it must match preferred language
             if (depot.language.isNotEmpty() && depot.language != preferredLanguage) {
                 // Note here, this logic is added to resolve A Date with Death - Expansion DLC (depotID: 2696090)
                 // the depot is in english language but there is only 1 depot in the dlcApp, we should always include it
@@ -1608,14 +1616,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                     return false
                 }
             }
-            // 6. Package grants this depot — prevents grabbing region depots the user has no license for.
-            //    Skip for DLC and systemDefined depots: DLC licensed via own package (check 4), systemDefined always granted.
-            if (depot.dlcAppId == INVALID_APP_ID && !depot.systemDefined && licensedDepotIds != null && depot.depotId !in licensedDepotIds)
-                return false
-            // 7. Prefer non-Steam-Deck depot when both exist (we're on Android, not Deck)
+            // 5. Prefer non-Steam-Deck depot when both exist (we're on Android, not Deck)
             if (depot.steamDeck && preferNonDeckWindows)
                 return false
-            // 8. Skip depot if the realm is SteamChina
+            // 6. Skip depot if the realm is SteamChina
             if (depot.realm == SteamRealm.SteamChina)
                 return false
 
@@ -1683,42 +1687,28 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         fun getMainAppDepots(appId: Int, containerLanguage: String): Map<Int, DepotInfo> {
             val appInfo = getAppInfoOf(appId) ?: return emptyMap()
-            val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
-            val licensedDepots = getLicensedDepotIds(appId).orEmpty().toMutableSet()
 
-            // Use the dlcAppID of the ownedDlc, to find the licensed depotIds from steam_license
-            val mainPackageDepotIds = getPkgInfoOf(appId)?.depotIds.orEmpty().toSet()
-            val mapDlcDepotIds = mutableMapOf<Int, List<Int>>()
-            ownedDlc.forEach { (dlcAppId, info) ->
-                val dlcDepotIds = getPkgInfoOf(dlcAppId)?.depotIds.orEmpty()
-
-                // Make sure licensedDepots contains the dlc depots
-                licensedDepots.addAll(dlcDepotIds)
-
-                if (mainPackageDepotIds.isEmpty()) return@forEach
-
-                val dlcOnlyDepotIds = dlcDepotIds.filter { it !in mainPackageDepotIds }
-                if (dlcOnlyDepotIds.isNotEmpty()) {
-                    mapDlcDepotIds[dlcAppId] = dlcOnlyDepotIds
+            // Some parent PICS records do not tag an embedded depot with its DLC AppID. Infer that
+            // relationship from public DLC metadata, never from the account's package/licenses.
+            val depotToDlcAppId = mutableMapOf<Int, Int>()
+            getCatalogDlcAppsOf(appId).orEmpty().forEach { dlcApp ->
+                dlcApp.depots.keys.forEach { depotId ->
+                    depotToDlcAppId.putIfAbsent(depotId, dlcApp.id)
                 }
             }
 
-            val baseDepots = resolveDownloadableDepots(appInfo.depots, containerLanguage, ownedDlc, licensedDepots, hasSteamUnlockedBranch)
+            val baseDepots = resolveDownloadableDepots(
+                depots = appInfo.depots,
+                preferredLanguage = containerLanguage,
+                ownedDlc = null,
+                licensedDepotIds = null,
+                hasSteamUnlockedBranch = hasSteamUnlockedBranch,
+            )
 
-            // Find in the depots of mainApp, that if any of the depotID is actually belongs to another steam_app entry
-            // override the dlcAppId to the corresponding app id
-            // It should fix Don't Starve DLC list, and keeping existing DLC logic correct
-            // For existing DLC logic, two games checked Halo MCC, Cyberpunk 2077 to have correct data
-            val map = mutableMapOf<Int, DepotInfo>()
-            baseDepots.forEach { (depotId, info) ->
-                val foundDlcAppId = mapDlcDepotIds
-                    .filter { it.value.contains(info.depotId) }
-                    .keys.firstOrNull()
-                map[depotId] = info.copy(dlcAppId = foundDlcAppId ?: info.dlcAppId)
+            return baseDepots.mapValues { (_, info) ->
+                info.copy(dlcAppId = depotToDlcAppId[info.depotId] ?: info.dlcAppId)
             }
-
-            return map
         }
 
         /**
@@ -1736,41 +1726,44 @@ class SteamService : Service(), IChallengeUrlChanged {
          */
         fun getDownloadableDepots(appId: Int, preferredLanguage: String): Map<Int, DepotInfo> {
             val appInfo = getAppInfoOf(appId) ?: return emptyMap()
-            val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
-            val licensedDepots = getLicensedDepotIds(appId).orEmpty().toMutableSet()
 
             val map = getMainAppDepots(appId, preferredLanguage).toMutableMap()
 
-            // parent app's arch applies to DLC arch selection
+            // Parent app architecture still guides DLC architecture selection, but ownership does not.
             val mainLanguage = SteamUtils.effectiveDepotLanguage(
-                appInfo.depots, preferredLanguage, ownedDlc, licensedDepots, hasSteamUnlockedBranch,
+                appInfo.depots, preferredLanguage, null, null, hasSteamUnlockedBranch,
             )
-            val has64Bit = eligibleDepots(appInfo.depots, mainLanguage, ownedDlc, licensedDepots)
+            val has64Bit = eligibleDepots(appInfo.depots, mainLanguage, null, null)
                 .any { it.osArch == OSArch.Arch64 }
 
-            val indirectDlcApps = getDownloadableDlcAppsOf(appId).orEmpty()
+            val indirectDlcApps = getCatalogDlcAppsOf(appId).orEmpty()
             indirectDlcApps.forEach { dlcApp ->
                 val dlcAppIdsWithSingleDepots = getDlcAppIdsWithSingleDepot(dlcApp.depots)
-                val dlcLicensedDepots = getLicensedDepotIds(dlcApp.id)
                 // Resolve the DLC's own language too, so DLC that omits the container language installs.
                 val dlcLanguage = SteamUtils.effectiveDepotLanguage(
-                    dlcApp.depots, preferredLanguage, null, dlcLicensedDepots, hasSteamUnlockedBranch,
+                    dlcApp.depots, preferredLanguage, null, null, hasSteamUnlockedBranch,
                 )
-                val dlcEligible = eligibleDepots(dlcApp.depots, dlcLanguage, null, dlcLicensedDepots)
+                val dlcEligible = eligibleDepots(dlcApp.depots, dlcLanguage, null, null)
                 val dlcHasNonDeckWin = dlcEligible.any { !it.steamDeck && it.isWindowsCompatible }
                 dlcApp.depots
                     .filter { (_, depot) ->
-                        filterForDownloadableDepots(depot, has64Bit, dlcHasNonDeckWin, dlcLanguage,
-                            null, dlcLicensedDepots, hasSteamUnlockedBranch,
-                            dlcAppIdsWithSingleDepots = dlcAppIdsWithSingleDepots
+                        filterForDownloadableDepots(
+                            depot,
+                            has64Bit,
+                            dlcHasNonDeckWin,
+                            dlcLanguage,
+                            null,
+                            null,
+                            hasSteamUnlockedBranch,
+                            dlcAppIdsWithSingleDepots = dlcAppIdsWithSingleDepots,
                         )
                     }
                     .forEach { (depotId, depot) ->
-                        // Add DLC Depots with custom object
+                        // Add DLC depots from public catalog metadata.
                         map[depotId] = DepotInfo(
                             depotId = depot.depotId,
-                            dlcAppId = dlcApp.id, // Set to DLC App ID
+                            dlcAppId = dlcApp.id,
                             optionalDlcId = depot.optionalDlcId,
                             depotFromApp = depot.depotFromApp,
                             sharedInstall = depot.sharedInstall,
@@ -2511,7 +2504,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             Timber.d("depots is empty? " + downloadableDepots.isEmpty())
             if (downloadableDepots.isEmpty()) return null
 
-            val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
+            val indirectDlcAppIds = getCatalogDlcAppsOf(appId).orEmpty().map { it.id }
 
             val hasDepotContent = { depot: DepotInfo ->
                 depot.manifests.isNotEmpty() || depot.encryptedManifests.isNotEmpty()
