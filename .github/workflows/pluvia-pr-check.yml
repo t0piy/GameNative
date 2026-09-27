@@ -48,15 +48,32 @@ jobs:
       - name: Build Modern debug bundle
         run: ./gradlew :app:bundleModernDebug
 
+      - name: Create CI debug keystore
+        run: |
+          keytool -genkeypair \
+            -keystore ci-debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
       - name: Build universal Modern debug APK
         run: |
           java -jar tools/bundletool-all-1.17.2.jar build-apks \
             --bundle=app/build/outputs/bundle/modernDebug/app-modern-debug.aab \
             --output=app-modern-debug.apks \
             --mode=universal \
-            --overwrite
+            --overwrite \
+            --ks=ci-debug.keystore \
+            --ks-pass=pass:android \
+            --ks-key-alias=androiddebugkey \
+            --key-pass=pass:android
           unzip -p app-modern-debug.apks universal.apk > GameNative-modern-debug.apk
           test -s GameNative-modern-debug.apk
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose GameNative-modern-debug.apk
           ls -lh GameNative-modern-debug.apk
 
       - name: Upload Modern debug APK
