@@ -44,6 +44,35 @@ class LuaManifestOverrideParserTest {
     }
 
     @Test
+    fun parsesDirectManifestFileNamesIncludingUnsignedGids() {
+        val parsed = SteamManifestOverrideStore.parseManifestFileName(
+            "123_18446744073709551615.manifest",
+        )
+
+        assertEquals(123, parsed?.depotId)
+        assertEquals(
+            "18446744073709551615",
+            parsed?.manifestId?.let(java.lang.Long::toUnsignedString),
+        )
+        assertNull(SteamManifestOverrideStore.parseManifestFileName("bad-name.manifest"))
+        assertNull(SteamManifestOverrideStore.parseManifestFileName("0_1.manifest"))
+    }
+
+    @Test
+    fun recognizesRawSteamManifestMagic() {
+        assertTrue(
+            SteamManifestOverrideStore.isRawSteamManifest(
+                byteArrayOf(0xD0.toByte(), 0x17, 0xF6.toByte(), 0x71, 0x00),
+            ),
+        )
+        assertFalse(
+            SteamManifestOverrideStore.isRawSteamManifest(
+                byteArrayOf(0x50, 0x4B, 0x03, 0x04),
+            ),
+        )
+    }
+
+    @Test
     fun lastActivePinForDepotWins() {
         val parsed = LuaManifestOverrideParser.parse(
             """
