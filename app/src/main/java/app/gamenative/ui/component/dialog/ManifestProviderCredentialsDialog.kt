@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -60,13 +63,16 @@ fun ManifestProviderCredentialsDialog(
 
     AlertDialog(
         onDismissRequest = {
-            if (!saving) onDismissRequest()
+            if (!saving && !signingIn) onDismissRequest()
         },
         title = {
             Text(stringResource(R.string.manifest_provider_credentials_title))
         },
         text = {
             Column(
+                modifier = Modifier
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(stringResource(R.string.manifest_provider_credentials_description))
@@ -74,7 +80,10 @@ fun ManifestProviderCredentialsDialog(
                 NoExtractOutlinedTextField(
                     value = loginCode,
                     onValueChange = {
-                        loginCode = it.take(6)
+                        loginCode = it
+                            .filter(Char::isLetterOrDigit)
+                            .uppercase()
+                            .take(6)
                         errorMessage = null
                     },
                     modifier = Modifier.fillMaxWidth(),
