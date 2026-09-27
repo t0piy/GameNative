@@ -41,6 +41,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     ManageMods(R.string.option_manage_mods),
     ChangeBranch(R.string.change_branch),
     ImportManifestOverrides(R.string.option_import_manifest_overrides),
+    ImportManifestUrl(R.string.option_import_manifest_url),
     ClearManifestOverrides(R.string.option_clear_manifest_overrides),
     ChangePreferredCopy(R.string.change_preferred_copy),
     AddToFavorites(R.string.option_add_to_favorites),
