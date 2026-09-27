@@ -1292,8 +1292,9 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         /**
          * Fetch public PICS metadata for a catalog result so the existing Steam details/LuaTools
-         * UI can be reused. For an unowned app the row keeps INVALID_PKG_ID, so normal library and
-         * download entitlement checks continue to reject it.
+         * UI can be reused. Public metadata hydration is independent of package/license ownership;
+         * the row keeps any existing package state only so ownership-specific library features
+         * remain accurate.
          */
         suspend fun hydratePublicAppInfo(appId: Int): SteamApp? = withContext(Dispatchers.IO) {
             if (appId <= 0) return@withContext null
@@ -2703,13 +2704,6 @@ class SteamService : Service(), IChallengeUrlChanged {
                     try {
                         if (isUpdateOrVerify) {
                             SteamUtils.clearStaleDrmBackups(appDirPath)
-                        }
-
-                        // Get licenses from database
-                        val licenses = getLicensesFromDb()
-                        if (licenses.isEmpty()) {
-                            Timber.w("No licenses available for download")
-                            return@launch
                         }
 
                         // Register with centralized queue and auto-pause other downloads
