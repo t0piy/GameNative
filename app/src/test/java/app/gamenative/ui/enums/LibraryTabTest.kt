@@ -14,6 +14,7 @@ class LibraryTabTest {
         LibraryTab.GOG,
         LibraryTab.EPIC,
         LibraryTab.AMAZON,
+        LibraryTab.LUATOOLS,
         LibraryTab.LOCAL,
     )
 
@@ -102,7 +103,7 @@ class LibraryTabTest {
     @Test
     fun configurableEntries_containsRecommendedAndStoreTabs() {
         assertEquals(
-            listOf(LibraryTab.RECOMMENDED, LibraryTab.STEAM, LibraryTab.GOG, LibraryTab.EPIC, LibraryTab.AMAZON),
+            listOf(LibraryTab.RECOMMENDED, LibraryTab.STEAM, LibraryTab.GOG, LibraryTab.EPIC, LibraryTab.AMAZON, LibraryTab.LUATOOLS),
             LibraryTab.configurableEntries,
         )
     }
