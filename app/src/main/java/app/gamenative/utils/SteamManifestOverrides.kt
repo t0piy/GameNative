@@ -1,8 +1,12 @@
 package app.gamenative.utils
 
 import android.content.Context
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 import timber.log.Timber
 
 /**
@@ -79,6 +83,7 @@ object SteamManifestOverrideStore {
     private const val PAYLOAD_MAGIC = 0x71F617D0L
     private const val METADATA_MAGIC = 0x1F4812BEL
     private const val EOF_MAGIC = 0x32C415ABL
+    private const val MAX_REMOTE_BYTES = 64L * 1024L * 1024L
 
     private val manifestNameRegex = Regex("""^(\d+)_(\d+)\.manifest$""", RegexOption.IGNORE_CASE)
     private val manifestMetadataCache =
@@ -123,6 +128,64 @@ object SteamManifestOverrideStore {
      * staged. This import additionally checks the Steam manifest magic so arbitrary files cannot
      * be stored as depot manifests.
      */
+    /**
+     * Import a Lua pin file or raw depot manifest from an HTTPS URL.
+     *
+     * Only metadata is fetched here. Game content still comes from the normal Steam downloader,
+     * and the depot key is still requested from Steam before a local manifest is staged.
+     */
+    suspend fun importFromUrl(
+        context: Context,
+        appId: Int,
+        url: String,
+    ): Int = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+        val trimmed = url.trim()
+        require(trimmed.startsWith("https://", ignoreCase = true)) {
+            "Manifest source must use HTTPS"
+        }
+
+        val request = Request.Builder().url(trimmed).get().build()
+        SteamUtils.http.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "HTTP ${response.code}" }
+            check(response.request.url.isHttps) { "Manifest source redirected away from HTTPS" }
+
+            val body = response.body ?: error("Empty response body")
+            val declaredLength = body.contentLength()
+            require(declaredLength < 0L || declaredLength <= MAX_REMOTE_BYTES) {
+                "Manifest source is too large"
+            }
+
+            val output = ByteArrayOutputStream(
+                declaredLength.takeIf { it in 1..MAX_REMOTE_BYTES }?.toInt() ?: 16 * 1024,
+            )
+            body.byteStream().use { input ->
+                val buffer = ByteArray(16 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    total += read
+                    require(total <= MAX_REMOTE_BYTES) { "Manifest source is too large" }
+                    output.write(buffer, 0, read)
+                }
+            }
+
+            val bytes = output.toByteArray()
+            val fileName = response.request.url.pathSegments.lastOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: "manifest.lua"
+
+            if (isRawSteamManifest(bytes)) {
+                saveManifest(context, appId, fileName, bytes)
+                1
+            } else {
+                saveLua(context, appId, bytes.toString(Charsets.UTF_8))
+            }
+        }
+    }
+
     fun saveManifest(
         context: Context,
         appId: Int,
