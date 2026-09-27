@@ -880,7 +880,6 @@ class SteamService : Service(), IChallengeUrlChanged {
             val fromListOfDlc = linkedSetOf<Int>()
             val fromDepots = linkedSetOf<Int>()
             val fromParentRows = linkedSetOf<Int>()
-            val fromLicensedRows = linkedSetOf<Int>()
             val fromPics = linkedSetOf<Int>()
 
             fun collectFromApp(app: SteamApp?, intoListOfDlc: MutableSet<Int>, intoDepots: MutableSet<Int>) {
@@ -902,20 +901,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                 fromParentRows.add(it)
                 ids.add(it)
             }
-            svc.appDao.findDownloadableDLCApps(appId).orEmpty().forEach {
-                fromLicensedRows.add(it.id)
-                ids.add(it.id)
-            }
-            svc.appDao.findHiddenDLCApps(appId).orEmpty().forEach {
-                fromLicensedRows.add(it.id)
-                ids.add(it.id)
-            }
-
             if (!allowNetwork) {
                 Timber.d(
                     "resolveDlcIdsForApp appId=$appId allowNetwork=false " +
-                        "listofdlc=$fromListOfDlc depots=$fromDepots parentRows=$fromParentRows " +
-                        "licensedRows=$fromLicensedRows total=$ids",
+                        "listofdlc=$fromListOfDlc depots=$fromDepots parentRows=$fromParentRows total=$ids",
                 )
                 return ids
             }
@@ -976,7 +965,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             Timber.d(
                 "resolveDlcIdsForApp appId=$appId " +
                     "listofdlcLocal=$fromListOfDlc picsListofdlc=$fromPics depots=$fromDepots " +
-                    "parentRows=$fromParentRows licensedRows=$fromLicensedRows total=${ids.size} ids=$ids",
+                    "parentRows=$fromParentRows total=${ids.size} ids=$ids",
             )
             return ids
         }
@@ -1348,6 +1337,69 @@ class SteamService : Service(), IChallengeUrlChanged {
                 existing
             }
         }
+
+        /**
+         * Resolve and hydrate public DLC PICS rows for a parent app without consulting licenses.
+         * This populates the catalog rows used by depot discovery even when the account owns
+         * neither the base app nor any of its DLC. Steam still decides content access later.
+         */
+        suspend fun hydratePublicDlcMetadata(parentAppId: Int): List<SteamApp> =
+            withContext(Dispatchers.IO) {
+                if (parentAppId <= 0) return@withContext emptyList()
+                val service = instance ?: return@withContext emptyList()
+                val steamApps = service._steamApps ?: return@withContext emptyList()
+                val dlcIds = resolveDlcIdsForApp(parentAppId, allowNetwork = true)
+                    .filter { it > 0 && it != INVALID_APP_ID && it != parentAppId }
+                    .distinct()
+                if (dlcIds.isEmpty()) return@withContext emptyList()
+
+                val hydrated = mutableListOf<SteamApp>()
+                dlcIds.chunked(MAX_PICS_BUFFER).forEach { chunk ->
+                    try {
+                        val tokens = runCatching {
+                            steamApps.picsGetAccessTokens(
+                                appIds = chunk,
+                                packageIds = emptyList(),
+                            ).await().appTokens
+                        }.onFailure {
+                            Timber.w(
+                                it,
+                                "Public DLC access-token lookup failed parent=$parentAppId size=${chunk.size}",
+                            )
+                        }.getOrDefault(emptyMap())
+
+                        val callback = steamApps.picsGetProductInfo(
+                            apps = chunk.map { dlcId ->
+                                PICSRequest(id = dlcId, accessToken = tokens[dlcId] ?: 0L)
+                            },
+                            packages = emptyList(),
+                        ).await()
+
+                        callback.results.forEach { result ->
+                            result.apps.forEach { (dlcId, product) ->
+                                if (dlcId !in dlcIds) return@forEach
+                                val existing = service.appDao.findApp(dlcId)
+                                val parsed = product.keyValues.generateSteamApp().copy(
+                                    packageId = existing?.packageId ?: INVALID_PKG_ID,
+                                    ownerAccountId = existing?.ownerAccountId ?: emptyList(),
+                                    licenseFlags = existing?.licenseFlags
+                                        ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                                    receivedPICS = true,
+                                    lastChangeNumber = product.changeNumber,
+                                )
+                                service.appDao.insert(parsed)
+                                hydrated += parsed
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(
+                            e,
+                            "Failed to hydrate public DLC metadata parent=$parentAppId size=${chunk.size}",
+                        )
+                    }
+                }
+                hydrated
+            }
 
         fun getDownloadingAppInfoOf(appId: Int): DownloadingAppInfo? {
             return runBlocking(Dispatchers.IO) { instance?.downloadingAppInfoDao?.getDownloadingApp(appId) }
