@@ -56,7 +56,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "app.gamenative"
+        applicationId = "app.gamenative.luatools"
 
         minSdk = 26
 
