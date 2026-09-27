@@ -64,6 +64,46 @@ class SteamStoreSearchParserTest {
     }
 
     @Test
+    fun compactItems_inferAppBundleAndPackageIdsFromAssetUrls() {
+        val body = org.json.JSONObject()
+            .put(
+                "items",
+                org.json.JSONArray()
+                    .put(
+                        org.json.JSONObject()
+                            .put("name", "Compact App")
+                            .put("logo", "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/111/header.jpg"),
+                    )
+                    .put(
+                        org.json.JSONObject()
+                            .put("name", "Compact Bundle")
+                            .put("logo", "https://shared.fastly.steamstatic.com/store_item_assets/steam/bundles/222/header.jpg"),
+                    )
+                    .put(
+                        org.json.JSONObject()
+                            .put("name", "Compact Package")
+                            .put("logo", "https://shared.fastly.steamstatic.com/store_item_assets/steam/subs/333/header.jpg"),
+                    ),
+            )
+            .put("total_count", 3)
+            .toString()
+
+        val page = SteamStoreSearchParser.parseSearchResponse(body)
+
+        assertEquals(3, page.totalCount)
+        assertEquals(
+            listOf(
+                SteamStoreItemKind.APP to 111,
+                SteamStoreItemKind.BUNDLE to 222,
+                SteamStoreItemKind.PACKAGE to 333,
+            ),
+            page.results.map { it.kind to it.itemId },
+        )
+        assertEquals("https://store.steampowered.com/bundle/222/", page.results[1].storeUrl)
+        assertEquals("https://store.steampowered.com/sub/333/", page.results[2].storeUrl)
+    }
+
+    @Test
     fun filterKey_isStableAndTagCycleSupportsIncludeExclude() {
         val action = SteamStoreFilterOption("tags", "19", "Action", "Tags")
         val software = SteamStoreFilterOption("category1", "994", "Software", "Product types")
