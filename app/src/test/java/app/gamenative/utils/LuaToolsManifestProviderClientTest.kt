@@ -19,6 +19,23 @@ class LuaToolsManifestProviderClientTest {
     }
 
     @Test
+    fun directProvidersCanBeAttemptedEvenWhenDiscoveryIsUnknown() {
+        val direct = LuaToolsManifestSource(
+            name = "Ryuu",
+            status = "unknown",
+            transport = LuaToolsProviderTransport.Direct,
+        )
+        val proxied = LuaToolsManifestSource(
+            name = "Skyflare",
+            status = "unknown",
+            transport = LuaToolsProviderTransport.LuaToolsProxy,
+        )
+
+        assertEquals(true, direct.canAttemptDownload)
+        assertEquals(false, proxied.canAttemptDownload)
+    }
+
+    @Test
     fun unknownProviderRequiresAnotherTransport() {
         assertNull(
             LuaToolsManifestProviderClient.directProviderUrl("Skyflare", 1145350),
