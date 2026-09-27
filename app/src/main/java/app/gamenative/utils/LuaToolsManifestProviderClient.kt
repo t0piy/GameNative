@@ -333,6 +333,10 @@ object LuaToolsManifestProviderClient {
                     appId = appId,
                     fileName = "$appId.zip",
                     bytes = bytes,
+                    provenance = ManifestOverrideProvenance(
+                        sourceKind = ManifestOverrideSourceKind.DirectProvider,
+                        sourceLabel = sourceName,
+                    ),
                 )
             }
 
@@ -359,6 +363,10 @@ object LuaToolsManifestProviderClient {
                     appId = appId,
                     fileName = "$appId.zip",
                     bytes = bytes,
+                    provenance = ManifestOverrideProvenance(
+                        sourceKind = ManifestOverrideSourceKind.LuaToolsProvider,
+                        sourceLabel = sourceName,
+                    ),
                 )
             }
         }
@@ -381,6 +389,10 @@ object LuaToolsManifestProviderClient {
             appId = appId,
             fileName = "$appId.zip",
             bytes = bytes,
+            provenance = ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.Hubcap,
+                sourceLabel = "Sadie (Hubcap)",
+            ),
         )
     }
 
