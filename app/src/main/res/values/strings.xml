@@ -2733,4 +2733,6 @@
     <string name="manifest_target_base">Base game · %1$d</string>
     <string name="manifest_target_dlc">%1$s · DLC %2$d</string>
     <string name="manifest_override_namespace">Target AppID: %1$d</string>
+    <string name="manifest_provider_luatools_dlc">lua.tools DLC metadata</string>
+    <string name="manifest_provider_luatools_dlc_description">Uses lua.tools' DLC-specific endpoint for the selected AppID. Requires a lua.tools session.</string>
 </resources>
