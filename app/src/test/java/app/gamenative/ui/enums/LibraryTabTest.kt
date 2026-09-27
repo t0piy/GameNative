@@ -69,6 +69,7 @@ class LibraryTabTest {
                 LibraryTab.FAVORITES,
                 LibraryTab.GOG,
                 LibraryTab.AMAZON,
+                LibraryTab.LUATOOLS,
                 LibraryTab.LOCAL,
             ),
             result,
