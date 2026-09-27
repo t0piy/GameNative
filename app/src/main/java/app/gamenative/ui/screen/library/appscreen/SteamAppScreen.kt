@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -830,7 +831,7 @@ class SteamAppScreen : BaseAppScreen() {
         val isDownloadInProgress = SteamService.getDownloadingAppInfoOf(gameId) != null
         val scope = rememberCoroutineScope()
         var hasManifestOverrides by remember(gameId) {
-            mutableStateOf(SteamManifestOverrideStore.fileFor(context, gameId).isFile)
+            mutableStateOf(SteamManifestOverrideStore.hasOverrides(context, gameId))
         }
         val manifestOverridePicker = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocument(),
@@ -839,11 +840,34 @@ class SteamAppScreen : BaseAppScreen() {
                 scope.launch {
                     try {
                         val count = withContext(Dispatchers.IO) {
-                            val text = context.contentResolver.openInputStream(uri)
-                                ?.bufferedReader(Charsets.UTF_8)
-                                ?.use { it.readText() }
+                            val bytes = context.contentResolver.openInputStream(uri)
+                                ?.use { it.readBytes() }
                                 ?: error("Could not read selected file")
-                            SteamManifestOverrideStore.saveLua(context, gameId, text)
+                            val displayName = context.contentResolver.query(
+                                uri,
+                                arrayOf(OpenableColumns.DISPLAY_NAME),
+                                null,
+                                null,
+                                null,
+                            )?.use { cursor ->
+                                if (cursor.moveToFirst()) cursor.getString(0) else null
+                            } ?: uri.lastPathSegment.orEmpty()
+
+                            if (SteamManifestOverrideStore.isRawSteamManifest(bytes)) {
+                                SteamManifestOverrideStore.saveManifest(
+                                    context = context,
+                                    appId = gameId,
+                                    fileName = displayName,
+                                    bytes = bytes,
+                                )
+                                1
+                            } else {
+                                SteamManifestOverrideStore.saveLua(
+                                    context,
+                                    gameId,
+                                    bytes.toString(Charsets.UTF_8),
+                                )
+                            }
                         }
                         hasManifestOverrides = true
                         SnackbarManager.show(
