@@ -2693,4 +2693,10 @@
     <string name="manifest_provider_proxy_auth">Requires lua.tools sign-in</string>
     <string name="manifest_provider_hubcap_key">Requires a Hubcap key</string>
     <string name="manifest_provider_downloading">Downloading from %1$s…</string>
+    <string name="settings_manifest_fast_fetch_title">Manifest FastFetch</string>
+    <string name="settings_manifest_fast_fetch_subtitle">Before a fresh Steam install, automatically try available direct manifest providers. If it fails, the normal Steam download continues.</string>
+    <string name="settings_manifest_fast_fetch_cleartext_title">Allow HTTP providers in FastFetch</string>
+    <string name="settings_manifest_fast_fetch_cleartext_subtitle">Allows automatic FastFetch from direct providers without HTTPS, such as Ryuu's legacy endpoint. Enable only if you accept HTTP integrity risk.</string>
+    <string name="manifest_fast_fetch_checking">Checking alternate manifest providers…</string>
+    <string name="manifest_fast_fetch_used">Imported manifests from %1$s; starting Steam download.</string>
 </resources>
