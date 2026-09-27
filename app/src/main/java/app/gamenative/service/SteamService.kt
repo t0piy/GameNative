@@ -2755,9 +2755,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                             parentScope = this,
                         )
 
-                        val unresolvedDepotIds = selectedDepots.keys
-                            .filterNot { it in completedDepotIds }
-                            .sorted()
+                        val unresolvedDepotIds = GameDownloadService.unresolvedSelectedDepotIds(
+                            selectedDepotIds = selectedDepots.keys,
+                            completedDepotIds = completedDepotIds,
+                        )
                         if (unresolvedDepotIds.isNotEmpty()) {
                             throw GameDownloadService.DownloadFailedException(
                                 "Required Steam depot(s) could not be resolved: " +
