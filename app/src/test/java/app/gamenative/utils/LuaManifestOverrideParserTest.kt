@@ -85,7 +85,7 @@ class LuaManifestOverrideParserTest {
             var remaining = value
             val out = mutableListOf<Byte>()
             do {
-                var next = (remaining and 0x7fu).toByte()
+                var next = (remaining and 0x7fuL).toByte()
                 remaining = remaining shr 7
                 if (remaining != 0uL) next = (next.toInt() or 0x80).toByte()
                 out += next
@@ -94,9 +94,9 @@ class LuaManifestOverrideParserTest {
         }
 
         val metadata =
-            varint(8u) + varint(123u) +
-                varint(16u) + varint(456u) +
-                varint(40u) + varint(789u)
+            varint(8uL) + varint(123uL) +
+                varint(16uL) + varint(456uL) +
+                varint(40uL) + varint(789uL)
         val raw =
             u32(0x71F617D0L) + u32(0) +
                 u32(0x1F4812BEL) + u32(metadata.size.toLong()) + metadata +
