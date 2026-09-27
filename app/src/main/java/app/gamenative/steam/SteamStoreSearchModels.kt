@@ -96,7 +96,7 @@ data class SteamStoreSearchFilters(
         }
         return MessageDigest.getInstance("SHA-256")
             .digest(raw.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     fun toggle(option: SteamStoreFilterOption): SteamStoreSearchFilters {
