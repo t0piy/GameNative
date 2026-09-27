@@ -84,9 +84,10 @@ import app.gamenative.ui.model.GogRecommendationsViewModel
 import app.gamenative.ui.model.SteamExplorerViewModel
 import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
-import app.gamenative.ui.util.ListItemImage
 import app.gamenative.utils.ConversionTracker
 import com.posthog.PostHog
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 import java.util.EnumSet
 import kotlinx.coroutines.delay
 import timber.log.Timber
@@ -493,11 +494,9 @@ private fun SteamExplorerPane(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (currentImage.isNotBlank()) {
-                                    ListItemImage(
+                                    SteamExplorerArtwork(
+                                        imageUrl = currentImage,
                                         modifier = Modifier.fillMaxSize(),
-                                        imageModifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop,
-                                        image = { currentImage },
                                         onFailure = {
                                             if (currentImage != result.imageUrl && result.imageUrl.isNotBlank()) {
                                                 currentImage = result.imageUrl
@@ -630,13 +629,11 @@ private fun SteamExplorerDetailsDialog(
                     item("hero") {
                         val hero = details?.headerImage.orEmpty().ifBlank { result.imageUrl }
                         if (hero.isNotBlank()) {
-                            ListItemImage(
+                            SteamExplorerArtwork(
+                                imageUrl = hero,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(460f / 215f),
-                                imageModifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                image = { hero },
                             )
                         }
                     }
@@ -827,13 +824,11 @@ private fun SteamExplorerDetailsDialog(
                                                 modifier = Modifier.padding(bottom = 8.dp),
                                             )
                                         }
-                                        ListItemImage(
+                                        SteamExplorerArtwork(
+                                            imageUrl = imageUrl,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .aspectRatio(16f / 9f),
-                                            imageModifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop,
-                                            image = { imageUrl },
                                         )
                                     }
                                 }
@@ -894,6 +889,45 @@ private fun SteamExplorerDetailsDialog(
             }
         }
     }
+}
+
+@Composable
+private fun SteamExplorerArtwork(
+    imageUrl: String,
+    modifier: Modifier = Modifier,
+    onFailure: () -> Unit = {},
+) {
+    CoilImage(
+        modifier = modifier,
+        imageModel = { imageUrl },
+        imageOptions = ImageOptions(
+            contentScale = ContentScale.Crop,
+            contentDescription = null,
+        ),
+        loading = {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            }
+        },
+        failure = {
+            onFailure()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "?",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
 }
 
 @Composable
