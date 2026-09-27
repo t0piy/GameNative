@@ -1,5 +1,5 @@
 ﻿<resources>
-    <string name="app_name">GameNative</string>
+    <string name="app_name">GameNative LuaTools</string>
     <string name="login_user">Login Utente</string>
     <string name="login_2fa">Due Fattori</string>
     <string name="home">Home</string>
@@ -2303,7 +2303,7 @@
     <string name="featured_status_preorder_body">Preordina per essere pronto al lancio</string>
     <string name="featured_status_out_now_title">Disponibile ora</string>
     <string name="featured_status_out_now_body">Ora disponibile</string>
-    <string name="tab_recommended">Consigliati</string>
+    <string name="tab_recommended">Explorer</string>
     <string name="gog_rec_empty">Aggiungi o gioca ad alcuni giochi per ricevere consigli GOG basati sulla tua libreria.</string>
     <!-- Steam achievements -->
     <string name="achievements">Obiettivi</string>
