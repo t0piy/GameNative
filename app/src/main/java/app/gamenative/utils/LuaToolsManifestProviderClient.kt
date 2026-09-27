@@ -8,11 +8,18 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONObject
 
+enum class LuaToolsProviderTransport {
+    Direct,
+    LuaToolsProxy,
+    Hubcap,
+}
+
 data class LuaToolsManifestSource(
     val name: String,
     val displayName: String = name,
     val status: String,
     val requiresUserKey: Boolean = false,
+    val transport: LuaToolsProviderTransport = LuaToolsProviderTransport.LuaToolsProxy,
 ) {
     val available: Boolean
         get() = status.equals("available", ignoreCase = true)
@@ -38,11 +45,22 @@ object LuaToolsManifestProviderClient {
     private const val HUBCAP_BASE = "https://hubcapmanifest.com"
     private const val MAX_PROVIDER_BYTES = 128L * 1024L * 1024L
 
+    // These match HttpServerService.LoadApiSources() in the referenced LuaTools revision.
+    // They are provider endpoints themselves, not lua.tools' authenticated proxy.
+    private const val RYUU_DIRECT_TEMPLATE = "http://167.235.229.108/<appid>"
+    private const val SUSHI_DIRECT_TEMPLATE =
+        "https://raw.githubusercontent.com/sushi-dev55-alt/sushitools-games-repo-alt/refs/heads/main/<appid>.zip"
+
     private val sourceDisplayNames = mapOf(
         HUBCAP_SOURCE_NAME to "Sadie (Hubcap)",
     )
 
     private val keyRequiredSources = setOf(HUBCAP_SOURCE_NAME)
+
+    private val directProviderTemplates = mapOf(
+        "Ryuu" to RYUU_DIRECT_TEMPLATE,
+        "Sushi" to SUSHI_DIRECT_TEMPLATE,
+    )
 
     suspend fun checkSources(
         appId: Int,
@@ -86,6 +104,11 @@ object LuaToolsManifestProviderClient {
                     displayName = sourceDisplayNames[name] ?: name,
                     status = status,
                     requiresUserKey = name in keyRequiredSources,
+                    transport = when {
+                        name == HUBCAP_SOURCE_NAME -> LuaToolsProviderTransport.Hubcap
+                        directProviderUrl(name, appId) != null -> LuaToolsProviderTransport.Direct
+                        else -> LuaToolsProviderTransport.LuaToolsProxy
+                    },
                 )
             }
             .sortedWith(
@@ -95,38 +118,69 @@ object LuaToolsManifestProviderClient {
     }
 
     /**
-     * Standard LuaTools providers (Ryuu, Sushi, TwentyTwo Cloud, Skyflare, etc.).
+     * Download a provider using the same separation visible in LuaTools:
      *
-     * The upstream desktop client sends its own lua.tools session bearer token here. A Steam
-     * login token is deliberately not accepted or transformed into a lua.tools credential.
+     * - Ryuu/Sushi: direct provider URLs, no lua.tools bearer required.
+     * - Hubcap/Sadie: direct Hubcap endpoint with the user's Hubcap key.
+     * - Other dynamic providers: lua.tools proxy, which requires a lua.tools bearer token.
+     *
+     * Steam credentials are never reused as provider credentials.
      */
-    suspend fun downloadStandardProvider(
+    suspend fun downloadProvider(
         context: Context,
         appId: Int,
         sourceName: String,
-        luaToolsBearerToken: String,
+        luaToolsBearerToken: String? = null,
+        hubcapApiKey: String? = null,
         gameName: String? = null,
     ): Int = withContext(Dispatchers.IO) {
         require(appId > 0) { "Invalid Steam app id" }
         require(sourceName.isNotBlank()) { "Provider name is required" }
-        require(luaToolsBearerToken.isNotBlank()) { "lua.tools sign-in is required" }
 
-        val source = encode(sourceName)
-        val game = gameName?.takeIf { it.isNotBlank() }?.let { "&game_name=${encode(it)}" }.orEmpty()
-        val url = "$LUA_TOOLS_API_BASE/api/manifest/download?appid=$appId&source=$source$game"
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $luaToolsBearerToken")
-            .get()
-            .build()
+        when {
+            sourceName.equals(HUBCAP_SOURCE_NAME, ignoreCase = true) -> {
+                require(!hubcapApiKey.isNullOrBlank()) { "Hubcap API key is required" }
+                downloadHubcap(context, appId, hubcapApiKey)
+            }
 
-        val bytes = executeDownload(request)
-        SteamManifestOverrideStore.importArtifact(
-            context = context,
-            appId = appId,
-            fileName = "$appId.zip",
-            bytes = bytes,
-        )
+            directProviderUrl(sourceName, appId) != null -> {
+                val url = directProviderUrl(sourceName, appId)!!
+                val request = Request.Builder().url(url).get().build()
+                val bytes = executeDownload(request)
+                SteamManifestOverrideStore.importArtifact(
+                    context = context,
+                    appId = appId,
+                    fileName = "$appId.zip",
+                    bytes = bytes,
+                )
+            }
+
+            else -> {
+                require(!luaToolsBearerToken.isNullOrBlank()) {
+                    "lua.tools sign-in is required for provider $sourceName"
+                }
+                val source = encode(sourceName)
+                val game = gameName
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { "&game_name=${encode(it)}" }
+                    .orEmpty()
+                val url =
+                    "$LUA_TOOLS_API_BASE/api/manifest/download?appid=$appId&source=$source$game"
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer $luaToolsBearerToken")
+                    .get()
+                    .build()
+
+                val bytes = executeDownload(request)
+                SteamManifestOverrideStore.importArtifact(
+                    context = context,
+                    appId = appId,
+                    fileName = "$appId.zip",
+                    bytes = bytes,
+                )
+            }
+        }
     }
 
     suspend fun downloadHubcap(
@@ -192,6 +246,14 @@ object LuaToolsManifestProviderClient {
             }
             return output.toByteArray()
         }
+    }
+
+    internal fun directProviderUrl(sourceName: String, appId: Int): String? {
+        if (appId <= 0) return null
+        val entry = directProviderTemplates.entries.firstOrNull {
+            it.key.equals(sourceName, ignoreCase = true)
+        } ?: return null
+        return entry.value.replace("<appid>", appId.toString())
     }
 
     private fun encode(value: String): String =
