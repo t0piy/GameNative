@@ -9,6 +9,7 @@ import app.gamenative.db.dao.SteamCatalogDao
 import app.gamenative.db.dao.SteamSearchCacheDao
 import app.gamenative.service.SteamService
 import app.gamenative.steam.SteamCatalogRepository
+import app.gamenative.steam.SteamStoreAppDetails
 import app.gamenative.steam.SteamStoreFilterCatalog
 import app.gamenative.steam.SteamStoreFilterOption
 import app.gamenative.steam.SteamStoreSearchFilters
@@ -47,6 +48,12 @@ class SteamExplorerViewModel @Inject constructor(
         val staleCache: Boolean = false,
         val error: String? = null,
         val filterError: String? = null,
+        val selectedResult: SteamStoreSearchResult? = null,
+        val details: SteamStoreAppDetails? = null,
+        val detailsLoading: Boolean = false,
+        val detailsFromCache: Boolean = false,
+        val detailsStaleCache: Boolean = false,
+        val detailsError: String? = null,
         val openingAppId: Int? = null,
     )
 
@@ -210,6 +217,76 @@ class SteamExplorerViewModel @Inject constructor(
             withContext(Dispatchers.Main) {
                 refresh()
             }
+        }
+    }
+
+    fun selectResult(result: SteamStoreSearchResult) {
+        _state.update {
+            it.copy(
+                selectedResult = result,
+                details = null,
+                detailsLoading = result.appId != null,
+                detailsFromCache = false,
+                detailsStaleCache = false,
+                detailsError = null,
+            )
+        }
+
+        val appId = result.appId ?: return
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                SteamCatalogRepository.loadAppDetails(
+                    appId = appId,
+                    cacheDao = steamSearchCacheDao,
+                )
+            }
+            if (_state.value.selectedResult?.appId != appId) return@launch
+            _state.update {
+                it.copy(
+                    details = outcome.details,
+                    detailsLoading = false,
+                    detailsFromCache = outcome.fromCache,
+                    detailsStaleCache = outcome.staleCache,
+                    detailsError = outcome.error,
+                )
+            }
+        }
+    }
+
+    fun refreshSelectedDetails() {
+        val appId = _state.value.selectedResult?.appId ?: return
+        _state.update { it.copy(detailsLoading = true, detailsError = null) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                SteamCatalogRepository.loadAppDetails(
+                    appId = appId,
+                    cacheDao = steamSearchCacheDao,
+                    forceRefresh = true,
+                )
+            }
+            if (_state.value.selectedResult?.appId != appId) return@launch
+            _state.update {
+                it.copy(
+                    details = outcome.details,
+                    detailsLoading = false,
+                    detailsFromCache = outcome.fromCache,
+                    detailsStaleCache = outcome.staleCache,
+                    detailsError = outcome.error,
+                )
+            }
+        }
+    }
+
+    fun closeDetails() {
+        _state.update {
+            it.copy(
+                selectedResult = null,
+                details = null,
+                detailsLoading = false,
+                detailsFromCache = false,
+                detailsStaleCache = false,
+                detailsError = null,
+            )
         }
     }
 
