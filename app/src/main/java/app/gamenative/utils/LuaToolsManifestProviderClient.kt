@@ -1,0 +1,199 @@
+package app.gamenative.utils
+
+import android.content.Context
+import java.io.ByteArrayOutputStream
+import java.net.URLEncoder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import org.json.JSONObject
+
+data class LuaToolsManifestSource(
+    val name: String,
+    val displayName: String = name,
+    val status: String,
+    val requiresUserKey: Boolean = false,
+) {
+    val available: Boolean
+        get() = status.equals("available", ignoreCase = true)
+}
+
+/**
+ * Android port of the manifest-provider plumbing used by LuaTools.
+ *
+ * Provider discovery mirrors LuaToolsApiClient.CheckSourcesAsync(): it talks to the public
+ * manifest backend with the same fixed User-Agent. Standard provider downloads mirror
+ * /api/manifest/download and therefore require a lua.tools bearer token; Hubcap/Sadie stays
+ * direct and uses the user's Hubcap key.
+ *
+ * Whatever provider returns is handed to [SteamManifestOverrideStore], which only consumes
+ * setManifestid pins and validated raw Steam manifests. Depot entitlement remains with Steam.
+ */
+object LuaToolsManifestProviderClient {
+    const val HUBCAP_SOURCE_NAME = "Sadie (Morrenus)"
+
+    private const val LUA_TOOLS_API_BASE = "https://lua.tools"
+    private const val MANIFEST_BACKEND_BASE = "http://167.235.229.108"
+    private const val MANIFEST_BACKEND_USER_AGENT = "secretgoonpoon"
+    private const val HUBCAP_BASE = "https://hubcapmanifest.com"
+    private const val MAX_PROVIDER_BYTES = 128L * 1024L * 1024L
+
+    private val sourceDisplayNames = mapOf(
+        HUBCAP_SOURCE_NAME to "Sadie (Hubcap)",
+    )
+
+    private val keyRequiredSources = setOf(HUBCAP_SOURCE_NAME)
+
+    suspend fun checkSources(
+        appId: Int,
+        hubcapApiKey: String? = null,
+    ): List<LuaToolsManifestSource> = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+
+        val statuses = linkedMapOf<String, String>()
+        runCatching {
+            val request = Request.Builder()
+                .url("$MANIFEST_BACKEND_BASE/check_apis?appid=$appId")
+                .header("User-Agent", MANIFEST_BACKEND_USER_AGENT)
+                .get()
+                .build()
+
+            Net.http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) return@use
+
+                val json = JSONObject(body)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val name = keys.next()
+                    statuses[name] = json.optString(name, "unknown")
+                }
+            }
+        }
+
+        val hubcapStatus = if (hubcapApiKey.isNullOrBlank()) {
+            "unknown"
+        } else {
+            checkHubcapStatus(appId, hubcapApiKey)
+        }
+        statuses[HUBCAP_SOURCE_NAME] = hubcapStatus
+
+        statuses.entries
+            .map { (name, status) ->
+                LuaToolsManifestSource(
+                    name = name,
+                    displayName = sourceDisplayNames[name] ?: name,
+                    status = status,
+                    requiresUserKey = name in keyRequiredSources,
+                )
+            }
+            .sortedWith(
+                compareByDescending<LuaToolsManifestSource> { it.requiresUserKey }
+                    .thenBy { it.displayName.lowercase() },
+            )
+    }
+
+    /**
+     * Standard LuaTools providers (Ryuu, Sushi, TwentyTwo Cloud, Skyflare, etc.).
+     *
+     * The upstream desktop client sends its own lua.tools session bearer token here. A Steam
+     * login token is deliberately not accepted or transformed into a lua.tools credential.
+     */
+    suspend fun downloadStandardProvider(
+        context: Context,
+        appId: Int,
+        sourceName: String,
+        luaToolsBearerToken: String,
+        gameName: String? = null,
+    ): Int = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+        require(sourceName.isNotBlank()) { "Provider name is required" }
+        require(luaToolsBearerToken.isNotBlank()) { "lua.tools sign-in is required" }
+
+        val source = encode(sourceName)
+        val game = gameName?.takeIf { it.isNotBlank() }?.let { "&game_name=${encode(it)}" }.orEmpty()
+        val url = "$LUA_TOOLS_API_BASE/api/manifest/download?appid=$appId&source=$source$game"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $luaToolsBearerToken")
+            .get()
+            .build()
+
+        val bytes = executeDownload(request)
+        SteamManifestOverrideStore.importArtifact(
+            context = context,
+            appId = appId,
+            fileName = "$appId.zip",
+            bytes = bytes,
+        )
+    }
+
+    suspend fun downloadHubcap(
+        context: Context,
+        appId: Int,
+        hubcapApiKey: String,
+    ): Int = withContext(Dispatchers.IO) {
+        require(appId > 0) { "Invalid Steam app id" }
+        require(hubcapApiKey.isNotBlank()) { "Hubcap API key is required" }
+
+        val url = "$HUBCAP_BASE/api/v1/manifest/$appId?api_key=${encode(hubcapApiKey)}"
+        val request = Request.Builder().url(url).get().build()
+
+        val bytes = executeDownload(request)
+        SteamManifestOverrideStore.importArtifact(
+            context = context,
+            appId = appId,
+            fileName = "$appId.zip",
+            bytes = bytes,
+        )
+    }
+
+    private fun checkHubcapStatus(appId: Int, key: String): String {
+        return runCatching {
+            val request = Request.Builder()
+                .url("$HUBCAP_BASE/api/v1/status/$appId")
+                .header("Authorization", "Bearer $key")
+                .get()
+                .build()
+            Net.http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use "unavailable"
+                val json = JSONObject(response.body?.string().orEmpty())
+                if (json.optBoolean("manifest_file_exists", false)) "available" else "unavailable"
+            }
+        }.getOrDefault("unknown")
+    }
+
+    private fun executeDownload(request: Request): ByteArray {
+        Net.http.newCall(request).execute().use { response ->
+            check(response.isSuccessful) {
+                "Provider request failed with HTTP ${response.code}"
+            }
+            val body = response.body ?: error("Provider returned an empty response")
+            val declared = body.contentLength()
+            require(declared < 0L || declared <= MAX_PROVIDER_BYTES) {
+                "Provider package is too large"
+            }
+
+            val output = ByteArrayOutputStream(
+                declared.takeIf { it in 1..MAX_PROVIDER_BYTES }?.toInt() ?: 32 * 1024,
+            )
+            body.byteStream().use { input ->
+                val buffer = ByteArray(32 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    total += read
+                    require(total <= MAX_PROVIDER_BYTES) { "Provider package is too large" }
+                    output.write(buffer, 0, read)
+                }
+            }
+            return output.toByteArray()
+        }
+    }
+
+    private fun encode(value: String): String =
+        URLEncoder.encode(value, Charsets.UTF_8.name())
+}
