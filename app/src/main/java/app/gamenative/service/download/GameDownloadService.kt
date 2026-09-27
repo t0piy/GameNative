@@ -575,11 +575,9 @@ object GameDownloadService {
             return null
         }
 
-        // Depot keys are granted to the app that OWNS the depot, not necessarily
-        // the app being downloaded: DLC depots (e.g. Vampire Survivors' 2230761,
-        // owned by DLC app 2230760) are refused with FileNotFound when requested
-        // as the parent app, even though the account owns the DLC. Ask the owning
-        // app first (dlcAppId, then depotfromapp), fall back to the parent app.
+        // Depot-key requests are scoped to the app associated with the depot, not necessarily
+        // the parent app being downloaded. Ask that app first (dlcAppId, then depotfromapp),
+        // then fall back to the parent app. Steam remains authoritative for the result.
         val owningAppId = when {
             depot.dlcAppId != SteamService.INVALID_APP_ID -> depot.dlcAppId
             depot.depotFromApp != SteamService.INVALID_APP_ID -> depot.depotFromApp
@@ -591,12 +589,14 @@ object GameDownloadService {
             keyCallback = steamApps.getDepotDecryptionKey(depotId, appId).await()
         }
         if (keyCallback.result != EResult.OK || keyCallback.depotKey.size != 32) {
-            val dlcNote = if (depot.dlcAppId != SteamService.INVALID_APP_ID) {
-                " (depot belongs to DLC app ${depot.dlcAppId} — not owned by this account?)"
+            val appScope = if (depot.dlcAppId != SteamService.INVALID_APP_ID) {
+                " dlcAppId=${depot.dlcAppId}"
             } else {
                 ""
             }
-            Timber.tag(TAG).w("Skipping depot $depotId: depot key denied (${keyCallback.result})$dlcNote")
+            Timber.tag(TAG).w(
+                "Skipping depot $depotId: Steam denied the depot key (${keyCallback.result})$appScope",
+            )
             return null
         }
 
@@ -616,8 +616,8 @@ object GameDownloadService {
         manifestOverridesByApp: Map<Int, Map<Int, SteamManifestOverride>>,
     ): Long {
         // LuaTools-style manifest overrides only replace the requested manifest GID.
-        // Entitlement is still enforced immediately afterwards by getDepotDecryptionKey(),
-        // so an override cannot grant access to a depot the Steam account does not own.
+        // Steam authorization is still performed immediately afterwards by
+        // getDepotDecryptionKey(); the override itself does not provide a depot key.
         val ownerAppId = SteamManifestOverrideStore.owningAppId(
             parentAppId = appId,
             dlcAppId = depot.dlcAppId,
