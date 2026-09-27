@@ -13,6 +13,7 @@ import app.gamenative.data.SteamFileHashCache
 import app.gamenative.data.SteamLicense
 import app.gamenative.data.SteamCatalogEntry
 import app.gamenative.data.SteamSearchCacheEntry
+import app.gamenative.data.SteamManualEntry
 import app.gamenative.data.CachedLicense
 import app.gamenative.data.DownloadingAppInfo
 import app.gamenative.data.EncryptedAppTicket
@@ -40,6 +41,7 @@ import app.gamenative.db.dao.SteamFileHashCacheDao
 import app.gamenative.db.dao.SteamLicenseDao
 import app.gamenative.db.dao.SteamCatalogDao
 import app.gamenative.db.dao.SteamSearchCacheDao
+import app.gamenative.db.dao.SteamManualEntryDao
 import app.gamenative.db.dao.AppInfoDao
 import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
@@ -64,6 +66,7 @@ const val DATABASE_NAME = "pluvia.db"
         SteamLicense::class,
         SteamCatalogEntry::class,
         SteamSearchCacheEntry::class,
+        SteamManualEntry::class,
         GOGGame::class,
         EpicGame::class,
         AmazonGame::class,
@@ -118,6 +121,8 @@ abstract class PluviaDatabase : RoomDatabase() {
     abstract fun steamCatalogDao(): SteamCatalogDao
 
     abstract fun steamSearchCacheDao(): SteamSearchCacheDao
+
+    abstract fun steamManualEntryDao(): SteamManualEntryDao
 
     abstract fun steamFileHashCacheDao(): SteamFileHashCacheDao
 
