@@ -684,7 +684,8 @@ private fun SteamExplorerDetailsDialog(
                                     }
                                 }
 
-                                details.price?.let { price ->
+                                val price = details.price
+                                if (price != null) {
                                     Text(
                                         text = buildString {
                                             if (price.discountPercent > 0) {
@@ -695,7 +696,7 @@ private fun SteamExplorerDetailsDialog(
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                     )
-                                } ?: if (details.isFree) {
+                                } else if (details.isFree) {
                                     Text(
                                         text = stringResource(R.string.explorer_steam_free),
                                         style = MaterialTheme.typography.titleMedium,
