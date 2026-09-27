@@ -42,6 +42,10 @@ fun ManifestProviderCredentialsDialog(
         ManifestProviderAuthManager.getCredentials(context)
     }
 
+    var loginCode by remember(visible) { mutableStateOf("") }
+    var signingIn by remember(visible) { mutableStateOf(false) }
+    var statusMessage by remember(visible) { mutableStateOf<String?>(null) }
+
     var accessToken by remember(visible) {
         mutableStateOf(existing.luaToolsSession?.accessToken.orEmpty())
     }
@@ -68,10 +72,63 @@ fun ManifestProviderCredentialsDialog(
                 Text(stringResource(R.string.manifest_provider_credentials_description))
 
                 NoExtractOutlinedTextField(
+                    value = loginCode,
+                    onValueChange = {
+                        loginCode = it.take(6)
+                        errorMessage = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !saving && !signingIn,
+                    singleLine = true,
+                    label = {
+                        Text(stringResource(R.string.manifest_provider_luatools_login_code))
+                    },
+                )
+
+                TextButton(
+                    enabled = loginCode.length == 6 && !saving && !signingIn,
+                    onClick = {
+                        signingIn = true
+                        errorMessage = null
+                        statusMessage = null
+                        scope.launch {
+                            try {
+                                val session = ManifestProviderAuthManager.signInWithLuaToolsCode(
+                                    context = context,
+                                    code = loginCode,
+                                )
+                                accessToken = session.accessToken
+                                refreshToken = session.refreshToken
+                                loginCode = ""
+                                statusMessage = context.getString(
+                                    R.string.manifest_provider_luatools_login_success,
+                                )
+                            } catch (error: Exception) {
+                                errorMessage = error.message ?: error.javaClass.simpleName
+                            } finally {
+                                signingIn = false
+                            }
+                        }
+                    },
+                ) {
+                    if (signingIn) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                            Text(stringResource(R.string.manifest_provider_luatools_signing_in))
+                        }
+                    } else {
+                        Text(stringResource(R.string.manifest_provider_luatools_sign_in))
+                    }
+                }
+
+                NoExtractOutlinedTextField(
                     value = accessToken,
                     onValueChange = { accessToken = it },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !saving,
+                    enabled = !saving && !signingIn,
                     singleLine = true,
                     label = {
                         Text(stringResource(R.string.manifest_provider_luatools_access_token))
@@ -83,7 +140,7 @@ fun ManifestProviderCredentialsDialog(
                     value = refreshToken,
                     onValueChange = { refreshToken = it },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !saving,
+                    enabled = !saving && !signingIn,
                     singleLine = true,
                     label = {
                         Text(stringResource(R.string.manifest_provider_luatools_refresh_token))
@@ -95,13 +152,17 @@ fun ManifestProviderCredentialsDialog(
                     value = hubcapApiKey,
                     onValueChange = { hubcapApiKey = it },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !saving,
+                    enabled = !saving && !signingIn,
                     singleLine = true,
                     label = {
                         Text(stringResource(R.string.manifest_provider_hubcap_api_key))
                     },
                     visualTransformation = PasswordVisualTransformation(),
                 )
+
+                statusMessage?.let {
+                    Text(it)
+                }
 
                 errorMessage?.let {
                     Text(it)
@@ -120,10 +181,11 @@ fun ManifestProviderCredentialsDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = !saving,
+                enabled = !saving && !signingIn,
                 onClick = {
                     saving = true
                     errorMessage = null
+                    statusMessage = null
                     scope.launch {
                         try {
                             withContext(Dispatchers.IO) {
@@ -150,16 +212,20 @@ fun ManifestProviderCredentialsDialog(
         dismissButton = {
             Row {
                 TextButton(
-                    enabled = !saving,
+                    enabled = !saving && !signingIn,
                     onClick = {
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 ManifestProviderAuthManager.clear(context)
                             }
+                            loginCode = ""
                             accessToken = ""
                             refreshToken = ""
                             hubcapApiKey = ""
                             errorMessage = null
+                            statusMessage = context.getString(
+                                R.string.manifest_provider_credentials_cleared,
+                            )
                             onSaved()
                         }
                     },
@@ -167,7 +233,7 @@ fun ManifestProviderCredentialsDialog(
                     Text(stringResource(R.string.manifest_provider_credentials_clear))
                 }
                 TextButton(
-                    enabled = !saving,
+                    enabled = !saving && !signingIn,
                     onClick = onDismissRequest,
                 ) {
                     Text(stringResource(R.string.cancel))
