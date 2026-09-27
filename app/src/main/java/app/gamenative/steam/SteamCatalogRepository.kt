@@ -157,7 +157,7 @@ object SteamCatalogRepository {
 
         return try {
             val url =
-                "https://store.steampowered.com/search/?ignore_preferences=1&ndl=1&l=" +
+                "https://store.steampowered.com/search/?ignore_preferences=1&show_all=1&ndl=1&l=" +
                     encode(steamLanguage())
             val html = execute(url)
             if (!html.contains("data-param", ignoreCase = true)) {
