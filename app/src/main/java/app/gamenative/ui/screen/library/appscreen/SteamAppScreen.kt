@@ -937,53 +937,34 @@ class SteamAppScreen : BaseAppScreen() {
                                         enabled = source.canAttemptDownload &&
                                             downloadingManifestProvider == null,
                                         onClick = {
-                                            when (source.transport) {
-                                                LuaToolsProviderTransport.Direct -> {
-                                                    downloadingManifestProvider = source.name
-                                                    scope.launch {
-                                                        try {
-                                                            val count =
-                                                                LuaToolsManifestProviderClient.downloadProvider(
-                                                                    context = context,
-                                                                    appId = gameId,
-                                                                    sourceName = source.name,
-                                                                    gameName = libraryItem.name,
-                                                                )
-                                                            hasManifestOverrides = true
-                                                            showManifestProvidersDialog = false
-                                                            SnackbarManager.show(
-                                                                context.getString(
-                                                                    R.string.manifest_overrides_imported,
-                                                                    count,
-                                                                ),
-                                                            )
-                                                        } catch (e: Exception) {
-                                                            Timber.w(
-                                                                e,
-                                                                "Manifest provider download failed app=$gameId source=${source.name}",
-                                                            )
-                                                            manifestProviderError =
-                                                                e.message ?: e.javaClass.simpleName
-                                                        } finally {
-                                                            downloadingManifestProvider = null
-                                                        }
-                                                    }
-                                                }
-
-                                                LuaToolsProviderTransport.LuaToolsProxy -> {
+                                            downloadingManifestProvider = source.name
+                                            manifestProviderError = null
+                                            scope.launch {
+                                                try {
+                                                    val count =
+                                                        LuaToolsManifestProviderClient.downloadProvider(
+                                                            context = context,
+                                                            appId = gameId,
+                                                            sourceName = source.name,
+                                                            gameName = libraryItem.name,
+                                                        )
+                                                    hasManifestOverrides = true
+                                                    showManifestProvidersDialog = false
                                                     SnackbarManager.show(
                                                         context.getString(
-                                                            R.string.manifest_provider_proxy_auth,
+                                                            R.string.manifest_overrides_imported,
+                                                            count,
                                                         ),
                                                     )
-                                                }
-
-                                                LuaToolsProviderTransport.Hubcap -> {
-                                                    SnackbarManager.show(
-                                                        context.getString(
-                                                            R.string.manifest_provider_hubcap_key,
-                                                        ),
+                                                } catch (e: Exception) {
+                                                    Timber.w(
+                                                        e,
+                                                        "Manifest provider download failed app=$gameId source=${source.name}",
                                                     )
+                                                    manifestProviderError =
+                                                        e.message ?: e.javaClass.simpleName
+                                                } finally {
+                                                    downloadingManifestProvider = null
                                                 }
                                             }
                                         },
@@ -1140,7 +1121,7 @@ class SteamAppScreen : BaseAppScreen() {
                     scope.launch {
                         try {
                             manifestProviders =
-                                LuaToolsManifestProviderClient.checkSources(gameId)
+                                LuaToolsManifestProviderClient.checkSources(context, gameId)
                         } catch (e: Exception) {
                             Timber.w(e, "Manifest provider discovery failed for app $gameId")
                             manifestProviderError =
