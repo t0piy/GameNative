@@ -2586,4 +2586,5 @@
     <string name="manifest_override_source_luatools">Provider via lua.tools</string>
     <string name="manifest_override_source_hubcap">Hubcap</string>
     <string name="manifest_override_source_unknown">Origem desconhecida</string>
+    <string name="manifest_overrides_info">Estes GIDs substituem a seleção de manifesto antes do download. A autorização do depot e a depot key continuam sendo obtidas normalmente pela Steam.</string>
 </resources>
