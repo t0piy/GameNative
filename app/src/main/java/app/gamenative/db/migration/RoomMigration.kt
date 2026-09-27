@@ -50,6 +50,42 @@ internal val ROOM_MIGRATION_V26_to_V27 = object : Migration(26, 27) {
     }
 }
 
+
+internal val ROOM_MIGRATION_V27_to_V28 = object : Migration(27, 28) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `steam_catalog` (
+                `app_id` INTEGER NOT NULL,
+                `name` TEXT NOT NULL,
+                `last_change_number` INTEGER NOT NULL,
+                `icon_hash` TEXT NOT NULL,
+                PRIMARY KEY(`app_id`)
+            )
+            """.trimIndent(),
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_steam_catalog_name` ON `steam_catalog` (`name`)",
+        )
+    }
+}
+
+internal val ROOM_MIGRATION_V28_to_V29 = object : Migration(28, 29) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `steam_search_cache` (
+                `cache_key` TEXT NOT NULL,
+                `payload_json` TEXT NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                `last_accessed_at` INTEGER NOT NULL,
+                PRIMARY KEY(`cache_key`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
 private fun SQLiteConnection.hasColumn(tableName: String, columnName: String): Boolean {
     prepare("PRAGMA table_info(`$tableName`)").use { statement ->
         while (statement.step()) {
