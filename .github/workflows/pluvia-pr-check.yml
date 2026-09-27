@@ -3,6 +3,14 @@ name: Pull Request build check
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "master" ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'keyvalues/**'
+      - 'media/**'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [ "master" ]
     paths-ignore:
@@ -49,16 +57,23 @@ jobs:
         run: ./gradlew :app:bundleModernDebug
 
       - name: Create CI debug keystore
+        env:
+          CI_DEBUG_KEYSTORE_BASE64: ${{ secrets.CI_DEBUG_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkeypair \
-            -keystore ci-debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000
+          if [ -n "$CI_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$CI_DEBUG_KEYSTORE_BASE64" | base64 --decode > ci-debug.keystore
+          else
+            echo "::warning::CI_DEBUG_KEYSTORE_BASE64 is not configured; this run will use an ephemeral debug signing key."
+            keytool -genkeypair \
+              -keystore ci-debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
 
       - name: Build universal Modern debug APK
         run: |
@@ -73,7 +88,9 @@ jobs:
             --key-pass=pass:android
           unzip -p app-modern-debug.apks universal.apk > GameNative-modern-debug.apk
           test -s GameNative-modern-debug.apk
-          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose GameNative-modern-debug.apk
+          APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose GameNative-modern-debug.apk
           ls -lh GameNative-modern-debug.apk
 
       - name: Upload Modern debug APK
