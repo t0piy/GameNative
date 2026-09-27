@@ -943,6 +943,7 @@ class SteamAppScreen : BaseAppScreen() {
         var checkingManifestProviders by remember(gameId) { mutableStateOf(false) }
         var manifestProviderError by remember(gameId) { mutableStateOf<String?>(null) }
         var downloadingManifestProvider by remember(gameId) { mutableStateOf<String?>(null) }
+        var manifestTargetDropdownExpanded by remember(gameId) { mutableStateOf(false) }
 
         ManifestProviderCredentialsDialog(
             visible = showManifestProviderCredentialsDialog,
@@ -958,7 +959,10 @@ class SteamAppScreen : BaseAppScreen() {
                 scope.launch {
                     try {
                         manifestProviders =
-                            LuaToolsManifestProviderClient.checkSources(context, gameId)
+                            LuaToolsManifestProviderClient.checkSources(
+                                context,
+                                selectedManifestTargetAppId,
+                            )
                     } catch (e: Exception) {
                         manifestProviderError =
                             e.message ?: e.javaClass.simpleName
@@ -985,6 +989,65 @@ class SteamAppScreen : BaseAppScreen() {
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        ExposedDropdownMenuBox(
+                            expanded = manifestTargetDropdownExpanded,
+                            onExpandedChange = {
+                                if (downloadingManifestProvider == null) {
+                                    manifestTargetDropdownExpanded = it
+                                }
+                            },
+                        ) {
+                            NoExtractOutlinedTextField(
+                                value = manifestTargetLabel(selectedManifestTargetAppId),
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = downloadingManifestProvider == null,
+                                singleLine = true,
+                                label = { Text(stringResource(R.string.manifest_target_label)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = manifestTargetDropdownExpanded,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = manifestTargetDropdownExpanded,
+                                onDismissRequest = {
+                                    manifestTargetDropdownExpanded = false
+                                },
+                            ) {
+                                manifestTargetAppIds.forEach { targetAppId ->
+                                    DropdownMenuItem(
+                                        text = { Text(manifestTargetLabel(targetAppId)) },
+                                        onClick = {
+                                            selectedManifestTargetAppId = targetAppId
+                                            manifestTargetDropdownExpanded = false
+                                            checkingManifestProviders = true
+                                            manifestProviderError = null
+                                            manifestProviders = emptyList()
+                                            scope.launch {
+                                                try {
+                                                    manifestProviders =
+                                                        LuaToolsManifestProviderClient.checkSources(
+                                                            context,
+                                                            targetAppId,
+                                                        )
+                                                } catch (e: Exception) {
+                                                    manifestProviderError =
+                                                        e.message ?: e.javaClass.simpleName
+                                                } finally {
+                                                    checkingManifestProviders = false
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
                         when {
                             checkingManifestProviders -> {
                                 Row(
@@ -1026,9 +1089,12 @@ class SteamAppScreen : BaseAppScreen() {
                                                     val count =
                                                         LuaToolsManifestProviderClient.downloadProvider(
                                                             context = context,
-                                                            appId = gameId,
+                                                            appId = selectedManifestTargetAppId,
                                                             sourceName = source.name,
-                                                            gameName = libraryItem.name,
+                                                            gameName = SteamService
+                                                                .getAppInfoOf(selectedManifestTargetAppId)
+                                                                ?.name
+                                                                ?: libraryItem.name,
                                                         )
                                                     hasManifestOverrides = true
                                                     showManifestProvidersDialog = false
@@ -1041,7 +1107,8 @@ class SteamAppScreen : BaseAppScreen() {
                                                 } catch (e: Exception) {
                                                     Timber.w(
                                                         e,
-                                                        "Manifest provider download failed app=$gameId source=${source.name}",
+                                                        "Manifest provider download failed app=" +
+                                                            "$selectedManifestTargetAppId source=${source.name}",
                                                     )
                                                     manifestProviderError =
                                                         e.message ?: e.javaClass.simpleName
@@ -1230,7 +1297,10 @@ class SteamAppScreen : BaseAppScreen() {
                     scope.launch {
                         try {
                             manifestProviders =
-                                LuaToolsManifestProviderClient.checkSources(context, gameId)
+                                LuaToolsManifestProviderClient.checkSources(
+                                    context,
+                                    selectedManifestTargetAppId,
+                                )
                         } catch (e: Exception) {
                             Timber.w(e, "Manifest provider discovery failed for app $gameId")
                             manifestProviderError =
