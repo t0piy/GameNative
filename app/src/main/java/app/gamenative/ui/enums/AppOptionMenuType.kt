@@ -40,6 +40,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     ExportFiles(R.string.option_export_files),
     ManageMods(R.string.option_manage_mods),
     ChangeBranch(R.string.change_branch),
+    ViewManifestOverrides(R.string.option_view_manifest_overrides),
     FindManifestProviders(R.string.option_find_manifest_providers),
     ImportManifestOverrides(R.string.option_import_manifest_overrides),
     ImportManifestUrl(R.string.option_import_manifest_url),
