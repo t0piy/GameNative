@@ -1567,7 +1567,7 @@ class SteamAppScreen : BaseAppScreen() {
                                 PrefManager.manifestFastFetch
                             ) {
                                 runCatching {
-                                    LuaToolsManifestProviderClient.fastFetchDirect(
+                                    LuaToolsManifestProviderClient.fastFetch(
                                         context = context,
                                         appId = gameId,
                                         gameName = appInfo?.name ?: libraryItem.name,
@@ -1835,7 +1835,7 @@ class SteamAppScreen : BaseAppScreen() {
                                 context.getString(R.string.manifest_fast_fetch_checking),
                             )
                             val fastFetch = runCatching {
-                                LuaToolsManifestProviderClient.fastFetchDirect(
+                                LuaToolsManifestProviderClient.fastFetch(
                                     context = context,
                                     appId = gameId,
                                     gameName = appInfo?.name ?: libraryItem.name,
