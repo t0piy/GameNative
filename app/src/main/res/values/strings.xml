@@ -2709,4 +2709,9 @@
     <string name="manifest_provider_credentials_saving">Saving and validating session…</string>
     <string name="manifest_provider_credentials_save">Save</string>
     <string name="manifest_provider_credentials_clear">Clear</string>
+    <string name="manifest_provider_luatools_login_code">lua.tools login code</string>
+    <string name="manifest_provider_luatools_sign_in">Sign in with code</string>
+    <string name="manifest_provider_luatools_signing_in">Signing in…</string>
+    <string name="manifest_provider_luatools_login_success">lua.tools session configured.</string>
+    <string name="manifest_provider_credentials_cleared">Credentials cleared.</string>
 </resources>
