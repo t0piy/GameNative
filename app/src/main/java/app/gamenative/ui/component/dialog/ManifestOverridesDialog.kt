@@ -71,6 +71,17 @@ fun ManifestOverridesDialog(
                             ),
                         )
 
+                        override.namespaceAppId?.takeIf { it > 0 }?.let { namespaceAppId ->
+                            Text(
+                                stringResource(
+                                    R.string.manifest_override_namespace,
+                                    namespaceAppId,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
                         override.sizeOnDisk?.takeIf { it > 0L }?.let { size ->
                             Text(
                                 stringResource(
