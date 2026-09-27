@@ -2739,7 +2739,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                         Timber.i("Downloading game to " + defaultAppInstallPath)
 
-                        GameDownloadService.downloadSteamApp(
+                        val completedDepotIds = GameDownloadService.downloadSteamApp(
                             appId = appId,
                             selectedDepots = selectedDepots,
                             branch = branch,
@@ -2754,6 +2754,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                             processWorkers = speedConfig.maxDecompress,
                             parentScope = this,
                         )
+
+                        val unresolvedDepotIds = selectedDepots.keys
+                            .filterNot { it in completedDepotIds }
+                            .sorted()
+                        if (unresolvedDepotIds.isNotEmpty()) {
+                            throw GameDownloadService.DownloadFailedException(
+                                "Required Steam depot(s) could not be resolved: " +
+                                    unresolvedDepotIds.joinToString(", "),
+                            )
+                        }
 
                         // Transfer is complete - unregister from GameDownloadService
                         GameDownloadService.unregisterDownload(instance?.applicationContext!!, GameSource.STEAM, appId.toString())
@@ -2935,10 +2945,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                     } catch (e: Exception) {
                         Timber.e(e, "Download failed for app $appId")
                         di.persistProgressSnapshot()
-                        // Mark all depots as failed
-                        selectedDepots.keys.sorted().forEachIndexed { idx, _ ->
-                            di.setWeight(idx, 0)
-                            di.setProgress(1f, idx)
+                        // Preserve the real partial progress. Setting every depot to 100% here made
+                        // failed/partial runs look complete and could immediately flip the UI state.
+                        di.setActive(false)
+                        e.message?.takeIf { it.isNotBlank() }?.let { reason ->
+                            SnackbarManager.show(
+                                instance?.getString(R.string.manifest_download_failed, reason)
+                                    ?: "Download failed: $reason",
+                            )
                         }
                         removeDownloadJob(appId)
                     }
