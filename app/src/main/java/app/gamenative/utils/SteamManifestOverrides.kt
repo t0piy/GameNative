@@ -217,6 +217,7 @@ object SteamManifestOverrideStore {
         var entries = 0
         var uncompressed = 0L
         var selectedLua: Pair<String, ByteArray>? = null
+        val pendingManifests = mutableListOf<Pair<String, ByteArray>>()
 
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             while (true) {
@@ -252,8 +253,10 @@ object SteamManifestOverrideStore {
                 val entryBytes = output.toByteArray()
 
                 if (isManifest) {
-                    saveManifest(context, appId, name, entryBytes)
-                    imported++
+                    // Validate every manifest before committing any of them, so a bad ZIP entry
+                    // cannot leave a half-imported provider package behind.
+                    validateManifest(name, entryBytes)
+                    pendingManifests += name to entryBytes
                 } else if (luaEntryMatchesApp(name, appId)) {
                     // Prefer exact <appid>.lua over build-suffixed variants if both exist.
                     val exact = name.equals("$appId.lua", ignoreCase = true)
@@ -266,14 +269,21 @@ object SteamManifestOverrideStore {
             }
         }
 
-        selectedLua?.let { (_, luaBytes) ->
-            val luaText = luaBytes.toString(Charsets.UTF_8)
-            if (LuaManifestOverrideParser.parse(luaText).isNotEmpty()) {
-                imported += saveLua(context, appId, luaText)
-            }
+        val selectedLuaText = selectedLua
+            ?.second
+            ?.toString(Charsets.UTF_8)
+            ?.takeIf { LuaManifestOverrideParser.parse(it).isNotEmpty() }
+
+        require(pendingManifests.isNotEmpty() || selectedLuaText != null) {
+            "ZIP contains no usable manifest pins or Steam manifest files"
         }
 
-        require(imported > 0) { "ZIP contains no usable manifest pins or Steam manifest files" }
+        pendingManifests.forEach { (name, manifestBytes) ->
+            saveManifest(context, appId, name, manifestBytes)
+            imported++
+        }
+        selectedLuaText?.let { imported += saveLua(context, appId, it) }
+
         return imported
     }
 
@@ -297,20 +307,7 @@ object SteamManifestOverrideStore {
         bytes: ByteArray,
     ): SteamManifestOverride {
         require(appId > 0) { "Invalid Steam app id" }
-        val fileOverride = parseManifestFileName(fileName)
-            ?: throw IllegalArgumentException(
-                "Manifest filename must be <depotId>_<manifestGid>.manifest",
-            )
-        require(isRawSteamManifest(bytes)) { "Selected file is not a raw Steam depot manifest" }
-        val metadata = parseRawSteamManifestMetadata(bytes)
-            ?: throw IllegalArgumentException("Could not parse Steam manifest metadata")
-        require(metadata.depotId == fileOverride.depotId) {
-            "Manifest depot ID does not match its filename"
-        }
-        require(metadata.manifestId == fileOverride.manifestId) {
-            "Manifest GID does not match its filename"
-        }
-        val override = fileOverride.copy(sizeOnDisk = metadata.sizeOnDisk)
+        val override = validateManifest(fileName, bytes)
 
         val dir = manifestRoot(context, appId)
         check(dir.exists() || dir.mkdirs()) { "Could not create manifest override directory" }
@@ -417,6 +414,26 @@ object SteamManifestOverrideStore {
         if (manifests.exists() && !manifests.deleteRecursively()) success = false
 
         return success
+    }
+
+    private fun validateManifest(
+        fileName: String,
+        bytes: ByteArray,
+    ): SteamManifestOverride {
+        val fileOverride = parseManifestFileName(fileName)
+            ?: throw IllegalArgumentException(
+                "Manifest filename must be <depotId>_<manifestGid>.manifest",
+            )
+        require(isRawSteamManifest(bytes)) { "Selected file is not a raw Steam depot manifest" }
+        val metadata = parseRawSteamManifestMetadata(bytes)
+            ?: throw IllegalArgumentException("Could not parse Steam manifest metadata")
+        require(metadata.depotId == fileOverride.depotId) {
+            "Manifest depot ID does not match its filename"
+        }
+        require(metadata.manifestId == fileOverride.manifestId) {
+            "Manifest GID does not match its filename"
+        }
+        return fileOverride.copy(sizeOnDisk = metadata.sizeOnDisk)
     }
 
     fun parseManifestFileName(fileName: String): SteamManifestOverride? {
