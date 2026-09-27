@@ -146,7 +146,7 @@ object ManifestProviderAuthManager {
     fun getCredentials(context: Context): ManifestProviderCredentials =
         ManifestProviderCredentialStore(context).read()
 
-    fun saveManualCredentials(
+    suspend fun saveManualCredentials(
         context: Context,
         accessToken: String,
         refreshToken: String,
@@ -156,19 +156,36 @@ object ManifestProviderAuthManager {
         val refresh = refreshToken.trim()
         val hubcap = hubcapApiKey.trim()
 
-        val session = if (access.isNotBlank()) {
-            val expiresAt = jwtExpiryEpochSeconds(access)
-                ?: throw IllegalArgumentException("lua.tools access token is not a JWT with an exp claim")
-            require(expiresAt > System.currentTimeMillis() / 1000L) {
-                "lua.tools access token is already expired"
+        if (hubcap.isNotBlank()) {
+            require(isValidHubcapKeyFormat(hubcap)) {
+                "Hubcap key must start with smm_ and contain 96 lowercase hex characters"
             }
-            LuaToolsProviderSession(
-                accessToken = access,
-                refreshToken = refresh,
-                expiresAtEpochSeconds = expiresAt,
-            )
-        } else {
-            null
+        }
+
+        val now = System.currentTimeMillis() / 1000L
+        val session = when {
+            access.isBlank() && refresh.isBlank() -> null
+
+            access.isNotBlank() -> {
+                val expiresAt = jwtExpiryEpochSeconds(access)
+                    ?: throw IllegalArgumentException(
+                        "lua.tools access token is not a JWT with an exp claim",
+                    )
+                if (expiresAt > now + 30L) {
+                    LuaToolsProviderSession(
+                        accessToken = access,
+                        refreshToken = refresh,
+                        expiresAtEpochSeconds = expiresAt,
+                    )
+                } else {
+                    require(refresh.isNotBlank()) {
+                        "lua.tools access token is expired and no refresh token was provided"
+                    }
+                    refreshLuaToolsSession(refresh)
+                }
+            }
+
+            else -> refreshLuaToolsSession(refresh)
         }
 
         ManifestProviderCredentialStore(context).write(
@@ -244,6 +261,9 @@ object ManifestProviderAuthManager {
                 )
             }
         }
+
+    internal fun isValidHubcapKeyFormat(key: String): Boolean =
+        Regex("""^smm_[0-9a-f]{96}$""").matches(key)
 
     internal fun jwtExpiryEpochSeconds(token: String): Long? = runCatching {
         val parts = token.split('.')
