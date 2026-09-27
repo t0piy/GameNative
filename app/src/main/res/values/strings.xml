@@ -2714,4 +2714,18 @@
     <string name="manifest_provider_luatools_signing_in">Signing in…</string>
     <string name="manifest_provider_luatools_login_success">lua.tools session configured.</string>
     <string name="manifest_provider_credentials_cleared">Credentials cleared.</string>
+    <string name="option_view_manifest_overrides">View active manifests</string>
+    <string name="manifest_overrides_title">Active manifests</string>
+    <string name="manifest_overrides_empty">No manifest override is active for this game.</string>
+    <string name="manifest_override_depot">Depot %1$d</string>
+    <string name="manifest_override_gid">Manifest GID: %1$s</string>
+    <string name="manifest_override_size">Installed size: %1$s</string>
+    <string name="manifest_override_source">Source: %1$s</string>
+    <string name="manifest_override_imported_at">Imported: %1$s</string>
+    <string name="manifest_override_source_local">Local file</string>
+    <string name="manifest_override_source_url">Remote URL</string>
+    <string name="manifest_override_source_direct">Direct provider</string>
+    <string name="manifest_override_source_luatools">lua.tools provider</string>
+    <string name="manifest_override_source_hubcap">Hubcap</string>
+    <string name="manifest_override_source_unknown">Unknown source</string>
 </resources>
