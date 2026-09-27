@@ -614,12 +614,21 @@ private fun SteamExplorerFilterDialog(
 
                     item("price") {
                         SteamFilterSectionTitle(stringResource(R.string.explorer_steam_price_discount))
+                        SteamBooleanFilterRow(
+                            label = stringResource(R.string.explorer_steam_free_only),
+                            checked = state.filters.maxPrice == "free",
+                            onCheckedChange = { enabled ->
+                                priceDraft = ""
+                                onSetMaxPrice(if (enabled) "free" else null)
+                            },
+                        )
                         OutlinedTextField(
-                            value = priceDraft,
+                            value = if (state.filters.maxPrice == "free") "" else priceDraft,
                             onValueChange = { value ->
                                 priceDraft = value.filter { it.isDigit() || it == '.' || it == ',' }
                                 onSetMaxPrice(priceDraft.replace(',', '.'))
                             },
+                            enabled = state.filters.maxPrice != "free",
                             singleLine = true,
                             label = { Text(stringResource(R.string.explorer_steam_max_price)) },
                             modifier = Modifier
