@@ -18,6 +18,7 @@ import app.gamenative.steam.SteamStoreFilterCatalog
 import app.gamenative.steam.SteamStoreFilterOption
 import app.gamenative.steam.SteamStoreSearchFilters
 import app.gamenative.steam.SteamStoreSearchResult
+import app.gamenative.steam.SteamStorePlatformSupport
 import app.gamenative.steam.SteamStoreSort
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.concurrent.atomic.AtomicInteger
@@ -472,7 +473,7 @@ class SteamExplorerViewModel @Inject constructor(
         val base = store ?: SteamStoreAppDetails(appId = appId)
 
         val picsPlatforms = pics?.let { app ->
-            app.gamenative.steam.SteamStorePlatformSupport(
+            SteamStorePlatformSupport(
                 windows = OS.windows in app.osList,
                 mac = OS.macos in app.osList,
                 linux = OS.linux in app.osList,
