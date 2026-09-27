@@ -853,21 +853,12 @@ class SteamAppScreen : BaseAppScreen() {
                                 if (cursor.moveToFirst()) cursor.getString(0) else null
                             } ?: uri.lastPathSegment.orEmpty()
 
-                            if (SteamManifestOverrideStore.isRawSteamManifest(bytes)) {
-                                SteamManifestOverrideStore.saveManifest(
-                                    context = context,
-                                    appId = gameId,
-                                    fileName = displayName,
-                                    bytes = bytes,
-                                )
-                                1
-                            } else {
-                                SteamManifestOverrideStore.saveLua(
-                                    context,
-                                    gameId,
-                                    bytes.toString(Charsets.UTF_8),
-                                )
-                            }
+                            SteamManifestOverrideStore.importArtifact(
+                                context = context,
+                                appId = gameId,
+                                fileName = displayName,
+                                bytes = bytes,
+                            )
                         }
                         hasManifestOverrides = true
                         SnackbarManager.show(
