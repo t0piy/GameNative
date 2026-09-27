@@ -68,6 +68,14 @@ object GameDownloadService {
     /** Thrown when a native download run finishes with `success = false` (not a cancel). */
     class DownloadFailedException(message: String) : Exception(message)
 
+    internal fun unresolvedSelectedDepotIds(
+        selectedDepotIds: Collection<Int>,
+        completedDepotIds: Set<Int>,
+    ): List<Int> = selectedDepotIds
+        .filterNot { it in completedDepotIds }
+        .distinct()
+        .sorted()
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Steam
     // ─────────────────────────────────────────────────────────────────────────────
