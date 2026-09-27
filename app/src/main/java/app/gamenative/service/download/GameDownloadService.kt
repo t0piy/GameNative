@@ -7,6 +7,7 @@ import app.gamenative.data.SteamApp
 import app.gamenative.service.SteamService
 import app.gamenative.utils.DepotManifestFiles
 import app.gamenative.utils.LocaleHelper
+import app.gamenative.utils.LuaToolsManifestProviderClient
 import app.gamenative.utils.SteamManifestOverride
 import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.generateSteamApp
@@ -132,6 +133,56 @@ object GameDownloadService {
                     }
                 }
             }.orEmpty()
+
+        SteamService.instance?.applicationContext?.let { context ->
+            withContext(Dispatchers.IO) {
+                selectedDepots.toSortedMap().forEach { (depotId, depot) ->
+                    val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                        parentAppId = appId,
+                        dlcAppId = depot.dlcAppId,
+                        depotFromApp = depot.depotFromApp,
+                        invalidAppId = SteamService.INVALID_APP_ID,
+                    )
+                    val ownerOverride = manifestOverridesByApp[ownerAppId]?.get(depotId)
+                    val override = ownerOverride
+                        ?: if (ownerAppId != appId) {
+                            manifestOverridesByApp[appId]?.get(depotId)
+                        } else {
+                            null
+                        }
+                        ?: return@forEach
+
+                    val namespaceAppId = override.namespaceAppId
+                        ?: if (ownerOverride != null) ownerAppId else appId
+
+                    if (
+                        !SteamManifestOverrideStore.hasLocalManifest(
+                            context = context,
+                            appId = namespaceAppId,
+                            depotId = depotId,
+                            manifestId = override.manifestId,
+                        )
+                    ) {
+                        runCatching {
+                            LuaToolsManifestProviderClient.ensureRawDepotManifest(
+                                context = context,
+                                namespaceAppId = namespaceAppId,
+                                depotId = depotId,
+                                manifestId = override.manifestId,
+                                provenance = override.provenance,
+                            )
+                        }.onFailure {
+                            // Optional metadata fallback only. The native engine can still request
+                            // the manifest from Steam after entitlement/key resolution.
+                            Timber.tag(TAG).d(
+                                it,
+                                "lua.tools raw manifest fallback unavailable for depot $depotId",
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         val resolvedDepots = coroutineScope {
             selectedDepots.toSortedMap().map { (depotId, depot) ->
