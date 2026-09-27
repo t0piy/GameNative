@@ -2775,4 +2775,26 @@
     <string name="explorer_steam_cache_description">Recent Store searches and the live filter/tag catalog are cached locally for faster repeat searches and temporary offline fallback.</string>
     <string name="explorer_steam_cache_clear">Clear Steam Explorer cache</string>
 
+
+    <!-- Steam Explorer details -->
+    <string name="explorer_steam_free">Free</string>
+    <string name="explorer_steam_details_information">Information</string>
+    <string name="explorer_steam_details_release">Release date</string>
+    <string name="explorer_steam_details_developer">Developer</string>
+    <string name="explorer_steam_details_publisher">Publisher</string>
+    <string name="explorer_steam_details_platforms">Platforms</string>
+    <string name="explorer_steam_details_genres">Genres</string>
+    <string name="explorer_steam_details_categories">Features &amp; categories</string>
+    <string name="explorer_steam_details_recommendations">Recommendations</string>
+    <string name="explorer_steam_details_achievements">Achievements</string>
+    <string name="explorer_steam_details_about">About</string>
+    <string name="explorer_steam_details_languages">Supported languages</string>
+    <string name="explorer_steam_details_pc_requirements">PC system requirements</string>
+    <string name="explorer_steam_details_minimum">Minimum</string>
+    <string name="explorer_steam_details_recommended">Recommended</string>
+    <string name="explorer_steam_details_screenshots">Screenshots</string>
+    <string name="explorer_steam_details_error">Some Steam Store details could not be refreshed: %1$s</string>
+    <string name="explorer_steam_open_luatools">Open Steam / LuaTools options</string>
+    <string name="explorer_steam_coming_soon">Coming soon</string>
+
 </resources>
