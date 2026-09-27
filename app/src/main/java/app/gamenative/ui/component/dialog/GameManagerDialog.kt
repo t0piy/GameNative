@@ -108,7 +108,7 @@ fun GameManagerDialog(
     val installedDlcIds = installedApp?.dlcDepots.orEmpty()
 
     val indirectDlcAppIds = remember(gameId) {
-        SteamService.getDownloadableDlcAppsOf(gameId).orEmpty().map { it.id }
+        SteamService.getCatalogDlcAppsOf(gameId).orEmpty().map { it.id }
     }
 
     val mainAppDlcIdsWithoutProperDepotDlcIds = remember(gameId) {
