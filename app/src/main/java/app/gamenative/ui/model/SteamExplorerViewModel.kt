@@ -22,6 +22,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -67,11 +68,11 @@ class SteamExplorerViewModel @Inject constructor(
             var handledRefreshVersion = 0
             combine(
                 query.debounce(300).distinctUntilChanged(),
-                filters.distinctUntilChanged(),
+                filters,
                 refreshVersion,
             ) { currentQuery, currentFilters, version ->
                 Triple(currentQuery, currentFilters, version)
-            }.collect { (currentQuery, currentFilters, version) ->
+            }.collectLatest { (currentQuery, currentFilters, version) ->
                 val forceRefresh = version != handledRefreshVersion
                 handledRefreshVersion = version
                 runSearch(currentQuery, currentFilters, forceRefresh)
@@ -221,11 +222,14 @@ class SteamExplorerViewModel @Inject constructor(
                 SteamService.hydratePublicAppInfo(appId)
             }
             _state.update { it.copy(openingAppId = null) }
+            val iconHash = hydrated
+                ?.let { app -> app.clientIconHash.ifBlank { app.iconHash } }
+                .orEmpty()
             onReady(
                 LibraryItem(
                     appId = "${GameSource.STEAM.name}_$appId",
                     name = hydrated?.name?.takeIf { it.isNotBlank() } ?: result.name,
-                    iconHash = hydrated?.clientIconHash?.ifBlank { hydrated.iconHash }.orEmpty(),
+                    iconHash = iconHash,
                     capsuleImageUrl = hydrated?.getCapsuleUrl().orEmpty().ifBlank { result.imageUrl },
                     headerImageUrl = hydrated?.headerUrl.orEmpty().ifBlank { result.imageUrl },
                     heroImageUrl = hydrated?.getHeroUrl().orEmpty().ifBlank { result.imageUrl },
