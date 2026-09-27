@@ -3,8 +3,10 @@ package app.gamenative.ui.screen.library
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,11 +53,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -66,6 +73,7 @@ import app.gamenative.data.LibraryItem
 import app.gamenative.data.RecommendationRepository
 import app.gamenative.data.gog.GogRecCard
 import app.gamenative.service.SteamService
+import app.gamenative.steam.SteamStoreAppDetails
 import app.gamenative.steam.SteamStoreFilterOption
 import app.gamenative.steam.SteamStoreItemKind
 import app.gamenative.steam.SteamStoreSort
@@ -76,6 +84,7 @@ import app.gamenative.ui.model.GogRecommendationsViewModel
 import app.gamenative.ui.model.SteamExplorerViewModel
 import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
+import app.gamenative.ui.util.ListItemImage
 import app.gamenative.utils.ConversionTracker
 import com.posthog.PostHog
 import java.util.EnumSet
@@ -337,6 +346,30 @@ private fun SteamExplorerPane(
         )
     }
 
+    state.selectedResult?.let { selected ->
+        SteamExplorerDetailsDialog(
+            result = selected,
+            details = state.details,
+            loading = state.detailsLoading,
+            fromCache = state.detailsFromCache,
+            staleCache = state.detailsStaleCache,
+            error = state.detailsError,
+            steamAvailable = steamAvailable,
+            openingAppId = state.openingAppId,
+            onDismiss = viewModel::closeDetails,
+            onRefresh = viewModel::refreshSelectedDetails,
+            onOpenStore = { openStore(selected.storeUrl) },
+            onOpenLuaTools = if (selected.appId != null) {
+                {
+                    viewModel.closeDetails()
+                    viewModel.openApp(selected, onNavigate)
+                }
+            } else {
+                null
+            },
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -403,13 +436,6 @@ private fun SteamExplorerPane(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (!steamAvailable) {
-                Text(
-                    text = stringResource(R.string.explorer_steam_login_for_luatools),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
 
         state.error?.let { error ->
@@ -421,91 +447,487 @@ private fun SteamExplorerPane(
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            items(state.results, key = { it.key }) { result ->
-                val appId = result.appId
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = state.openingAppId == null) {
-                            if (appId != null && steamAvailable) {
-                                viewModel.openApp(result, onNavigate)
-                            } else {
-                                openStore(result.storeUrl)
-                            }
-                        },
-                ) {
-                    Row(
+        if (!state.searchLoading && state.results.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.explorer_steam_no_results),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(32.dp),
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                gridItems(state.results, key = { it.key }) { result ->
+                    val appId = result.appId
+                    val primaryImage = remember(result.key, result.imageUrl) {
+                        if (appId != null) {
+                            "https://shared.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg"
+                        } else {
+                            result.imageUrl
+                        }
+                    }
+                    var currentImage by remember(result.key, primaryImage, result.imageUrl) {
+                        mutableStateOf(primaryImage.ifBlank { result.imageUrl })
+                    }
+
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            .clickable { viewModel.selectResult(result) },
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = result.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = buildString {
-                                    append(
-                                        when (result.kind) {
-                                            SteamStoreItemKind.APP -> "App"
-                                            SteamStoreItemKind.BUNDLE -> "Bundle"
-                                            SteamStoreItemKind.PACKAGE -> "Package"
-                                            SteamStoreItemKind.OTHER -> "Store"
+                        Column {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(2f / 3f)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (currentImage.isNotBlank()) {
+                                    ListItemImage(
+                                        modifier = Modifier.fillMaxSize(),
+                                        imageModifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                        image = { currentImage },
+                                        onFailure = {
+                                            if (currentImage != result.imageUrl && result.imageUrl.isNotBlank()) {
+                                                currentImage = result.imageUrl
+                                            }
                                         },
                                     )
-                                    result.itemId?.let { append(" · ").append(it) }
-                                    if (result.releaseDate.isNotBlank()) {
-                                        append(" · ").append(result.releaseDate)
+                                } else {
+                                    Text(
+                                        text = result.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.padding(12.dp),
+                                    )
+                                }
+
+                                if (appId != null && SteamService.isAppInstalled(appId)) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp),
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.installed),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        )
                                     }
-                                    if (result.priceText.isNotBlank()) {
-                                        append(" · ").append(result.priceText)
-                                    }
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (appId != null && SteamService.isAppInstalled(appId)) {
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
                                 Text(
-                                    text = stringResource(R.string.installed),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    text = result.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = buildString {
+                                        append(
+                                            when (result.kind) {
+                                                SteamStoreItemKind.APP -> "App"
+                                                SteamStoreItemKind.BUNDLE -> "Bundle"
+                                                SteamStoreItemKind.PACKAGE -> "Package"
+                                                SteamStoreItemKind.OTHER -> "Store"
+                                            },
+                                        )
+                                        if (result.priceText.isNotBlank()) {
+                                            append(" · ").append(result.priceText)
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                        }
-
-                        if (state.openingAppId == appId && appId != null) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        } else if (appId == null || !steamAvailable) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInNew,
-                                contentDescription = stringResource(R.string.explorer_steam_open_store),
-                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            if (!state.searchLoading && state.results.isEmpty()) {
-                item("empty") {
+@Composable
+private fun SteamExplorerDetailsDialog(
+    result: app.gamenative.steam.SteamStoreSearchResult,
+    details: SteamStoreAppDetails?,
+    loading: Boolean,
+    fromCache: Boolean,
+    staleCache: Boolean,
+    error: String?,
+    steamAvailable: Boolean,
+    openingAppId: Int?,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenStore: () -> Unit,
+    onOpenLuaTools: (() -> Unit)?,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.94f),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
                     Text(
-                        text = stringResource(R.string.explorer_steam_no_results),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
+                        text = details?.name?.ifBlank { result.name } ?: result.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    IconButton(onClick = onRefresh, enabled = result.appId != null && !loading) {
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.close))
+                    }
+                }
+
+                HorizontalDivider()
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item("hero") {
+                        val hero = details?.headerImage.orEmpty().ifBlank { result.imageUrl }
+                        if (hero.isNotBlank()) {
+                            ListItemImage(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(460f / 215f),
+                                imageModifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                                image = { hero },
+                            )
+                        }
+                    }
+
+                    if (loading) {
+                        item("loading") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    }
+
+                    if (details != null) {
+                        item("summary") {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = details.type.ifBlank { "app" },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.explorer_steam_appid, details.appId),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (fromCache) {
+                                        Text(
+                                            text = if (staleCache) {
+                                                stringResource(R.string.explorer_steam_cache_stale)
+                                            } else {
+                                                stringResource(R.string.explorer_steam_cache)
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+
+                                details.price?.let { price ->
+                                    Text(
+                                        text = buildString {
+                                            if (price.discountPercent > 0) {
+                                                append("-").append(price.discountPercent).append("% · ")
+                                            }
+                                            append(price.finalFormatted.ifBlank { price.initialFormatted })
+                                        },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                } ?: if (details.isFree) {
+                                    Text(
+                                        text = stringResource(R.string.explorer_steam_free),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+
+                                if (details.shortDescription.isNotBlank()) {
+                                    Text(
+                                        text = details.shortDescription,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        }
+
+                        item("metadata") {
+                            SteamDetailsSection(
+                                title = stringResource(R.string.explorer_steam_details_information),
+                            ) {
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_release),
+                                    details.releaseDate.ifBlank {
+                                        if (details.comingSoon) stringResource(R.string.explorer_steam_coming_soon) else "—"
+                                    },
+                                )
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_developer),
+                                    details.developers.joinToString().ifBlank { "—" },
+                                )
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_publisher),
+                                    details.publishers.joinToString().ifBlank { "—" },
+                                )
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_platforms),
+                                    buildList {
+                                        if (details.platforms.windows) add("Windows")
+                                        if (details.platforms.mac) add("macOS")
+                                        if (details.platforms.linux) add("Linux")
+                                    }.joinToString().ifBlank { "—" },
+                                )
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_genres),
+                                    details.genres.joinToString { it.description }.ifBlank { "—" },
+                                )
+                                SteamDetailsValue(
+                                    stringResource(R.string.explorer_steam_details_categories),
+                                    details.categories.joinToString { it.description }.ifBlank { "—" },
+                                )
+                                details.metacriticScore?.let {
+                                    SteamDetailsValue("Metacritic", it.toString())
+                                }
+                                details.recommendationsTotal?.let {
+                                    SteamDetailsValue(
+                                        stringResource(R.string.explorer_steam_details_recommendations),
+                                        it.toString(),
+                                    )
+                                }
+                                details.achievementsTotal?.let {
+                                    SteamDetailsValue(
+                                        stringResource(R.string.explorer_steam_details_achievements),
+                                        it.toString(),
+                                    )
+                                }
+                            }
+                        }
+
+                        if (details.aboutTheGame.isNotBlank() || details.detailedDescription.isNotBlank()) {
+                            item("about") {
+                                SteamDetailsSection(
+                                    title = stringResource(R.string.explorer_steam_details_about),
+                                ) {
+                                    Text(
+                                        text = details.aboutTheGame.ifBlank { details.detailedDescription },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (details.supportedLanguages.isNotBlank()) {
+                            item("languages") {
+                                SteamDetailsSection(
+                                    title = stringResource(R.string.explorer_steam_details_languages),
+                                ) {
+                                    Text(details.supportedLanguages, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+
+                        if (
+                            details.pcRequirementsMinimum.isNotBlank() ||
+                            details.pcRequirementsRecommended.isNotBlank()
+                        ) {
+                            item("pc-requirements") {
+                                SteamDetailsSection(
+                                    title = stringResource(R.string.explorer_steam_details_pc_requirements),
+                                ) {
+                                    if (details.pcRequirementsMinimum.isNotBlank()) {
+                                        SteamDetailsValue(
+                                            stringResource(R.string.explorer_steam_details_minimum),
+                                            details.pcRequirementsMinimum,
+                                        )
+                                    }
+                                    if (details.pcRequirementsRecommended.isNotBlank()) {
+                                        SteamDetailsValue(
+                                            stringResource(R.string.explorer_steam_details_recommended),
+                                            details.pcRequirementsRecommended,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        details.screenshots.take(4).forEachIndexed { index, screenshot ->
+                            item("screenshot-$index") {
+                                val imageUrl = screenshot.fullUrl.ifBlank { screenshot.thumbnailUrl }
+                                if (imageUrl.isNotBlank()) {
+                                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                                        if (index == 0) {
+                                            Text(
+                                                text = stringResource(R.string.explorer_steam_details_screenshots),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(bottom = 8.dp),
+                                            )
+                                        }
+                                        ListItemImage(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(16f / 9f),
+                                            imageModifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                            image = { imageUrl },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    error?.let { message ->
+                        item("error") {
+                            Text(
+                                text = stringResource(R.string.explorer_steam_details_error, message),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                            )
+                        }
+                    }
+
+                    item("actions") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = onOpenStore,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.explorer_steam_open_store))
+                            }
+
+                            if (onOpenLuaTools != null) {
+                                OutlinedButton(
+                                    onClick = onOpenLuaTools,
+                                    enabled = steamAvailable && openingAppId == null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    if (openingAppId != null) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                        Spacer(modifier = Modifier.size(8.dp))
+                                    }
+                                    Text(
+                                        if (steamAvailable) {
+                                            stringResource(R.string.explorer_steam_open_luatools)
+                                        } else {
+                                            stringResource(R.string.explorer_steam_login_for_luatools)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SteamDetailsSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        content()
+    }
+}
+
+@Composable
+private fun SteamDetailsValue(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
