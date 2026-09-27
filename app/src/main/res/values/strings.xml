@@ -2675,4 +2675,10 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/s</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">Reset gyro settings</string>
+    <string name="option_import_manifest_overrides">Import manifest overrides</string>
+    <string name="option_clear_manifest_overrides">Remove manifest overrides</string>
+    <string name="manifest_overrides_imported">Imported %1$d manifest override(s).</string>
+    <string name="manifest_overrides_import_failed">Could not import manifest overrides: %1$s</string>
+    <string name="manifest_overrides_cleared">Manifest overrides removed.</string>
+    <string name="manifest_overrides_clear_failed">Could not remove manifest overrides.</string>
 </resources>
