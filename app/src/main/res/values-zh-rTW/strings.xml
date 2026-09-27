@@ -1,5 +1,5 @@
 ﻿<resources>
-    <string name="app_name">GameNative</string>
+    <string name="app_name">GameNative LuaTools</string>
     <string name="login_user">登入</string>
     <string name="login_2fa">雙重驗證</string>
     <string name="home">主頁</string>
@@ -2320,7 +2320,7 @@
     <string name="featured_status_preorder_body">預購以在發售時做好準備</string>
     <string name="featured_status_out_now_title">現已推出</string>
     <string name="featured_status_out_now_body">現在可用</string>
-    <string name="tab_recommended">推薦</string>
+    <string name="tab_recommended">Explorer</string>
     <string name="gog_rec_empty">新增或試玩一些遊戲，即可根據你的遊戲庫獲得 GOG 推薦。</string>
     <!-- Steam achievements -->
     <string name="achievements">成就</string>
