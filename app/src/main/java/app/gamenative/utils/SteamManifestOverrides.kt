@@ -267,10 +267,13 @@ object SteamManifestOverrideStore {
         }
 
         selectedLua?.let { (_, luaBytes) ->
-            imported += saveLua(context, appId, luaBytes.toString(Charsets.UTF_8))
+            val luaText = luaBytes.toString(Charsets.UTF_8)
+            if (LuaManifestOverrideParser.parse(luaText).isNotEmpty()) {
+                imported += saveLua(context, appId, luaText)
+            }
         }
 
-        require(imported > 0) { "ZIP contains no usable Lua or Steam manifest files" }
+        require(imported > 0) { "ZIP contains no usable manifest pins or Steam manifest files" }
         return imported
     }
 
