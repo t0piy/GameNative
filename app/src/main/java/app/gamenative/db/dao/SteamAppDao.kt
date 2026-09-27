@@ -162,6 +162,13 @@ interface SteamAppDao {
     )
     suspend fun findDownloadableDLCApps(appId: Int): List<SteamApp>?
 
+    /**
+     * Public/catalog DLC rows for depot discovery. This intentionally has no license join:
+     * ownership must not decide which public app/depot metadata GameNative can inspect.
+     */
+    @Query("SELECT * FROM steam_app WHERE dlc_for_app_id = :appId AND depots <> '{}'")
+    suspend fun findCatalogDLCApps(appId: Int): List<SteamApp>?
+
     @Query("SELECT * FROM steam_app AS app WHERE dlc_for_app_id = :appId AND depots = '{}' AND " +
             " EXISTS (" +
             "   SELECT * FROM steam_license AS license " +
