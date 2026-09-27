@@ -11,6 +11,7 @@ import app.gamenative.data.FileChangeLists
 import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamFileHashCache
 import app.gamenative.data.SteamLicense
+import app.gamenative.data.SteamCatalogEntry
 import app.gamenative.data.CachedLicense
 import app.gamenative.data.DownloadingAppInfo
 import app.gamenative.data.EncryptedAppTicket
@@ -36,6 +37,7 @@ import app.gamenative.db.dao.LibraryPlayHistoryDao
 import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.SteamFileHashCacheDao
 import app.gamenative.db.dao.SteamLicenseDao
+import app.gamenative.db.dao.SteamCatalogDao
 import app.gamenative.db.dao.AppInfoDao
 import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
@@ -58,6 +60,7 @@ const val DATABASE_NAME = "pluvia.db"
         SteamApp::class,
         SteamFileHashCache::class,
         SteamLicense::class,
+        SteamCatalogEntry::class,
         GOGGame::class,
         EpicGame::class,
         AmazonGame::class,
@@ -69,7 +72,7 @@ const val DATABASE_NAME = "pluvia.db"
         ModPlacementRecipe::class,
         ModOverwriteManifest::class,
     ],
-    version = 27,
+    version = 28,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -93,6 +96,7 @@ const val DATABASE_NAME = "pluvia.db"
         AutoMigration(from = 21, to = 22), // Added GOG vertical_cover_url column
         AutoMigration(from = 22, to = 23), // Added local library play history table
         AutoMigration(from = 25, to = 26), // Added GOG hidden column
+        AutoMigration(from = 27, to = 28), // Added lightweight Steam Explorer catalog
     ]
 )
 @TypeConverters(
@@ -108,6 +112,8 @@ abstract class PluviaDatabase : RoomDatabase() {
     abstract fun steamLicenseDao(): SteamLicenseDao
 
     abstract fun steamAppDao(): SteamAppDao
+
+    abstract fun steamCatalogDao(): SteamCatalogDao
 
     abstract fun steamFileHashCacheDao(): SteamFileHashCacheDao
 
