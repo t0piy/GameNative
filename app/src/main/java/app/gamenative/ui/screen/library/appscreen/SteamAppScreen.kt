@@ -470,8 +470,10 @@ class SteamAppScreen : BaseAppScreen() {
 
     override fun isValidToDownload(context: Context, libraryItem: LibraryItem): Boolean {
         val appInfo = SteamService.getAppInfoOf(libraryItem.gameId) ?: return false
-        if (appInfo.packageId == SteamService.INVALID_PKG_ID) return false
-        if (!SteamService.isAppLicensed(appInfo.packageId)) return false
+
+        // Explorer entries can represent apps that are not present in the local license cache.
+        // Do not infer installability from package ownership here; the download path remains
+        // authoritative and still obtains depot access from Steam when a download is attempted.
         return appInfo.depots.isNotEmpty()
     }
 
