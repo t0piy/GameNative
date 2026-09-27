@@ -542,6 +542,39 @@ fun SettingsGroupInterface(
             },
         )
 
+        var manifestFastFetch by rememberSaveable {
+            mutableStateOf(PrefManager.manifestFastFetch)
+        }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_manifest_fast_fetch_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_manifest_fast_fetch_subtitle)) },
+            state = manifestFastFetch,
+            onCheckedChange = {
+                manifestFastFetch = it
+                PrefManager.manifestFastFetch = it
+            },
+        )
+
+        var manifestFastFetchAllowCleartext by rememberSaveable {
+            mutableStateOf(PrefManager.manifestFastFetchAllowCleartext)
+        }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            enabled = manifestFastFetch,
+            title = {
+                Text(text = stringResource(R.string.settings_manifest_fast_fetch_cleartext_title))
+            },
+            subtitle = {
+                Text(text = stringResource(R.string.settings_manifest_fast_fetch_cleartext_subtitle))
+            },
+            state = manifestFastFetchAllowCleartext,
+            onCheckedChange = {
+                manifestFastFetchAllowCleartext = it
+                PrefManager.manifestFastFetchAllowCleartext = it
+            },
+        )
+
         // Download speed setting
         val downloadSpeedLabels = listOf(
             stringResource(R.string.settings_download_slow),
