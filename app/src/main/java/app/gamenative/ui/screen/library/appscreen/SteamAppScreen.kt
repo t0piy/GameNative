@@ -1580,6 +1580,22 @@ class SteamAppScreen : BaseAppScreen() {
                         )
                         hideInstallDialog(gameId)
                         CoroutineScope(Dispatchers.IO).launch {
+                            if (
+                                SteamService.getInstalledApp(gameId) == null &&
+                                PrefManager.manifestFastFetch
+                            ) {
+                                runCatching {
+                                    LuaToolsManifestProviderClient.fastFetchDirect(
+                                        context = context,
+                                        appId = gameId,
+                                        gameName = appInfo?.name ?: libraryItem.name,
+                                        allowCleartextDirect =
+                                            PrefManager.manifestFastFetchAllowCleartext,
+                                    )
+                                }.onFailure {
+                                    Timber.w(it, "Manifest FastFetch failed for app $gameId")
+                                }
+                            }
                             SteamService.downloadApp(gameId)
                         }
                     }
@@ -1832,7 +1848,40 @@ class SteamAppScreen : BaseAppScreen() {
                             ConversionTracker.campaignAttribution(gameId),
                     )
                     CoroutineScope(Dispatchers.IO).launch {
-                        SteamService.downloadApp(gameId, dlcAppIds, branch = branch, isUpdateOrVerify = false)
+                        if (installedApp == null && PrefManager.manifestFastFetch) {
+                            SnackbarManager.show(
+                                context.getString(R.string.manifest_fast_fetch_checking),
+                            )
+                            val fastFetch = runCatching {
+                                LuaToolsManifestProviderClient.fastFetchDirect(
+                                    context = context,
+                                    appId = gameId,
+                                    gameName = appInfo?.name ?: libraryItem.name,
+                                    allowCleartextDirect =
+                                        PrefManager.manifestFastFetchAllowCleartext,
+                                )
+                            }.onFailure {
+                                // Provider discovery/import is optional. A failure here must never
+                                // prevent the normal Steam installation from starting.
+                                Timber.w(it, "Manifest FastFetch failed for app $gameId")
+                            }.getOrNull()
+
+                            if (fastFetch != null) {
+                                SnackbarManager.show(
+                                    context.getString(
+                                        R.string.manifest_fast_fetch_used,
+                                        fastFetch.sourceName,
+                                    ),
+                                )
+                            }
+                        }
+
+                        SteamService.downloadApp(
+                            gameId,
+                            dlcAppIds,
+                            branch = branch,
+                            isUpdateOrVerify = false,
+                        )
                     }
                 },
                 onDismissRequest = {
