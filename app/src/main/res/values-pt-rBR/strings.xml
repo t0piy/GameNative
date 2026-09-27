@@ -2593,4 +2593,33 @@
     <string name="manifest_override_namespace">AppID alvo: %1$d</string>
     <string name="manifest_provider_luatools_dlc">Metadata de DLC via lua.tools</string>
     <string name="manifest_provider_luatools_dlc_description">Usa o endpoint específico de DLC do lua.tools para o AppID selecionado. Requer sessão lua.tools.</string>
+
+    <!-- Steam Explorer -->
+    <string name="explorer_steam_filters">Filtros</string>
+    <string name="explorer_steam_filters_count">Filtros (%1$d)</string>
+    <string name="explorer_steam_results_count">%1$d resultados da Loja Steam</string>
+    <string name="explorer_steam_cache">em cache</string>
+    <string name="explorer_steam_cache_stale">em cache · fallback offline</string>
+    <string name="explorer_steam_login_for_luatools">Entre na Steam para abrir AppIDs com o LuaTools.</string>
+    <string name="explorer_steam_search_error">Falha ao atualizar a Loja Steam: %1$s</string>
+    <string name="explorer_steam_open_store">Abrir na Loja Steam</string>
+    <string name="explorer_steam_no_results">Nenhum produto da Loja Steam corresponde a esta busca e combinação de filtros.</string>
+    <string name="explorer_steam_filters_title">Filtros da Loja Steam</string>
+    <string name="explorer_steam_filters_active">%1$d filtros ativos</string>
+    <string name="explorer_steam_filters_clear">Limpar tudo</string>
+    <string name="explorer_steam_sort">Ordenar por</string>
+    <string name="explorer_steam_price_discount">Preço, descontos e eventos</string>
+    <string name="explorer_steam_max_price">Preço máximo</string>
+    <string name="explorer_steam_specials_only">Somente promoções e itens com desconto</string>
+    <string name="explorer_steam_hide_f2p">Ocultar itens gratuitos</string>
+    <string name="explorer_steam_filter_search">Buscar filtro, tag, idioma, recurso…</string>
+    <string name="explorer_steam_loading_filters">Carregando o catálogo atual de filtros da Steam…</string>
+    <string name="explorer_steam_filter_fallback">Não foi possível atualizar os filtros da Steam. Controles em cache ou de fallback estão sendo exibidos.</string>
+    <string name="explorer_steam_tag_include">Incluir</string>
+    <string name="explorer_steam_tag_exclude">Excluir</string>
+    <string name="explorer_steam_tag_off">Desligada</string>
+    <string name="explorer_steam_cache_title">Cache da busca</string>
+    <string name="explorer_steam_cache_description">Buscas recentes da Loja e o catálogo de filtros/tags são armazenados localmente para buscas repetidas mais rápidas e fallback temporário sem rede.</string>
+    <string name="explorer_steam_cache_clear">Limpar cache do Steam Explorer</string>
+
 </resources>
