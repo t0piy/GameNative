@@ -204,7 +204,7 @@ object SteamCatalogRepository {
     }
 
     private fun buildSearchUrl(query: String, filters: SteamStoreSearchFilters): String {
-        val params = linkedMapOf(
+        val params = mutableListOf(
             "query" to "",
             "start" to "0",
             "count" to "50",
@@ -223,20 +223,24 @@ object SteamCatalogRepository {
             .filterValues { it.isNotEmpty() }
             .toSortedMap()
             .forEach { (param, values) ->
-                params[param] = values.sorted().joinToString(",")
+                if (param.endsWith("[]")) {
+                    values.sorted().forEach { value -> params += param to value }
+                } else {
+                    params += param to values.sorted().joinToString(",")
+                }
             }
 
         if (filters.excludedTagIds.isNotEmpty()) {
-            params["untags"] = filters.excludedTagIds.sorted().joinToString(",")
+            params += "untags" to filters.excludedTagIds.sorted().joinToString(",")
         }
-        filters.maxPrice?.takeIf { it.isNotBlank() }?.let { params["maxprice"] = it }
-        if (filters.specialsOnly) params["specials"] = "1"
-        if (filters.hideFreeToPlay) params["hidef2p"] = "1"
+        filters.maxPrice?.takeIf { it.isNotBlank() }?.let { params += "maxprice" to it }
+        if (filters.specialsOnly) params += "specials" to "1"
+        if (filters.hideFreeToPlay) params += "hidef2p" to "1"
 
         return buildString {
             append("https://store.steampowered.com/search/results/?")
             append(
-                params.entries.joinToString("&") { (key, value) ->
+                params.joinToString("&") { (key, value) ->
                     "${encode(key)}=${encode(value)}"
                 },
             )
