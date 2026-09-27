@@ -2797,4 +2797,16 @@
     <string name="explorer_steam_open_luatools">Open Steam / LuaTools options</string>
     <string name="explorer_steam_coming_soon">Coming soon</string>
 
+
+    <!-- Steam Explorer manual AppID -->
+    <string name="explorer_steam_add_by_id">Add by AppID</string>
+    <string name="explorer_steam_add_by_id_title">Add Steam product by AppID</string>
+    <string name="explorer_steam_add_by_id_description">Use this when a Steam product is hidden from search or unavailable in your region. GameNative LuaTools will try the local Store, alternate Store regions for public metadata, and authenticated PICS when available. This does not grant ownership or a license.</string>
+    <string name="explorer_steam_appid_input">Steam AppID</string>
+    <string name="explorer_steam_appid_example">Example: 1250650</string>
+    <string name="explorer_steam_add">Add</string>
+    <string name="explorer_steam_manual_badge">Manual</string>
+    <string name="explorer_steam_manual_count">%1$d added by AppID</string>
+    <string name="explorer_steam_remove_manual">Remove manual entry</string>
+
 </resources>
