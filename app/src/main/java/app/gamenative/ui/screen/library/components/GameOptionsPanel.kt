@@ -365,6 +365,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ExportFiles -> Icons.Default.FileDownload
         AppOptionMenuType.ManageMods -> Icons.Default.Extension
         AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
+        AppOptionMenuType.FindManifestProviders -> Icons.Default.CloudDownload
         AppOptionMenuType.ImportManifestOverrides -> Icons.Default.FileDownload
         AppOptionMenuType.ImportManifestUrl -> Icons.Default.CloudDownload
         AppOptionMenuType.ClearManifestOverrides -> Icons.Default.Delete
@@ -402,6 +403,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.MoveToInternalStorage,
             AppOptionMenuType.ChangeBranch,
             AppOptionMenuType.ChangePreferredCopy,
+            AppOptionMenuType.FindManifestProviders,
             AppOptionMenuType.ImportManifestOverrides,
             AppOptionMenuType.ImportManifestUrl,
             AppOptionMenuType.ClearManifestOverrides,
