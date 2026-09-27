@@ -101,36 +101,41 @@ class DepotFilteringTest {
         assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null))
     }
 
-    // -- licensedDepotIds filtering --
+    // -- ownership must not filter public depot metadata --
 
     @Test
-    fun `depot in licensed set passes`() {
+    fun `licensed depot set does not affect public depot resolution`() {
         val d = depot(depotId = 100, manifests = mapOf("public" to manifest()))
-        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null, setOf(100, 200)))
+        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null, setOf(200, 300)))
     }
 
     @Test
-    fun `depot not in licensed set is rejected`() {
-        val d = depot(depotId = 100, manifests = mapOf("public" to manifest()))
-        assertFalse(SteamService.filterForDownloadableDepots(d, true, false, "english", null, setOf(200, 300)))
+    fun `DLC ownership map does not affect public depot resolution`() {
+        val d = depot(
+            depotId = 100,
+            dlcAppId = 999,
+            manifests = mapOf("public" to manifest()),
+        )
+        assertTrue(
+            SteamService.filterForDownloadableDepots(
+                d,
+                true,
+                false,
+                "english",
+                ownedDlc = emptyMap(),
+                licensedDepotIds = emptySet(),
+            ),
+        )
     }
 
     @Test
-    fun `null licensedDepotIds skips license check`() {
-        val d = depot(depotId = 100, manifests = mapOf("public" to manifest()))
-        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null, null))
-    }
+    fun `system defined and regular depots use the same ownership agnostic metadata path`() {
+        val regular = depot(depotId = 100, manifests = mapOf("public" to manifest()), systemDefined = false)
+        val system = depot(depotId = 551, manifests = mapOf("public" to manifest()), systemDefined = true)
+        val unrelatedLicense = setOf(552, 553)
 
-    @Test
-    fun `systemDefined depot bypasses license check`() {
-        val d = depot(depotId = 551, manifests = mapOf("public" to manifest()), systemDefined = true)
-        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null, setOf(552, 553)))
-    }
-
-    @Test
-    fun `non-systemDefined depot still rejected when unlicensed`() {
-        val d = depot(depotId = 100, manifests = mapOf("public" to manifest()), systemDefined = false)
-        assertFalse(SteamService.filterForDownloadableDepots(d, true, false, "english", null, setOf(200, 300)))
+        assertTrue(SteamService.filterForDownloadableDepots(regular, true, false, "english", null, unrelatedLicense))
+        assertTrue(SteamService.filterForDownloadableDepots(system, true, false, "english", null, unrelatedLicense))
     }
 
     // -- Steam Deck depot filtering --
