@@ -160,6 +160,9 @@ object SteamCatalogRepository {
                 "https://store.steampowered.com/search/?ignore_preferences=1&ndl=1&l=" +
                     encode(steamLanguage())
             val html = execute(url)
+            if (!html.contains("data-param", ignoreCase = true)) {
+                error("Steam returned no live filter controls")
+            }
             val catalog = SteamStoreSearchParser.parseFilterCatalog(html, fetchedAt = now)
             if (catalog.groups.isEmpty()) error("Steam returned no filter metadata")
             cacheDao.put(
@@ -245,6 +248,7 @@ object SteamCatalogRepository {
             .url(url)
             .header("Accept", "application/json,text/html;q=0.9,*/*;q=0.8")
             .header("User-Agent", "GameNative-LuaTools")
+            .header("X-Requested-With", "XMLHttpRequest")
             .build()
 
         storeHttp.newCall(request).execute().use { response ->
