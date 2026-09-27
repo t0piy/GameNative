@@ -44,6 +44,7 @@ import app.gamenative.db.dao.ChangeNumbersDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.FileChangeListsDao
 import app.gamenative.db.dao.SteamAppDao
+import app.gamenative.db.dao.SteamCatalogDao
 import app.gamenative.db.dao.SteamFileHashCacheDao
 import app.gamenative.db.dao.SteamLicenseDao
 import app.gamenative.enums.LoginResult
@@ -88,6 +89,7 @@ import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesFamilygroupsS
 import app.gamenative.data.SteamCollectionRepository
 import app.gamenative.steam.CloudConfigStoreService
 import app.gamenative.steam.SteamCollectionParser
+import app.gamenative.steam.SteamCatalogRepository
 import `in`.dragonbra.javasteam.rpc.service.FamilyGroups
 import `in`.dragonbra.javasteam.steam.authentication.AuthPollResult
 import `in`.dragonbra.javasteam.steam.authentication.AuthSessionDetails
@@ -231,6 +233,9 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     @Inject
     lateinit var appDao: SteamAppDao
+
+    @Inject
+    lateinit var steamCatalogDao: SteamCatalogDao
 
     @Inject
     lateinit var changeNumbersDao: ChangeNumbersDao
@@ -1276,6 +1281,72 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         fun getAppInfoOf(appId: Int): SteamApp? {
             return runBlocking(Dispatchers.IO) { instance?.appDao?.findApp(appId) }
+        }
+
+        /**
+         * Refreshes the public Steam Explorer catalog through the user's authenticated Steam
+         * connection. This never changes licenses or ownership state.
+         */
+        fun refreshSteamCatalog(forceFull: Boolean = false) {
+            val service = instance ?: return
+            val steamApps = service._steamApps ?: return
+            if (!isLoggedIn) return
+
+            service.scope.launch {
+                SteamCatalogRepository.sync(
+                    steamApps = steamApps,
+                    dao = service.steamCatalogDao,
+                    forceFull = forceFull,
+                )
+            }
+        }
+
+        /**
+         * Fetch public PICS metadata for a catalog result so the existing Steam details/LuaTools
+         * UI can be reused. For an unowned app the row keeps INVALID_PKG_ID, so normal library and
+         * download entitlement checks continue to reject it.
+         */
+        suspend fun hydratePublicAppInfo(appId: Int): SteamApp? = withContext(Dispatchers.IO) {
+            if (appId <= 0) return@withContext null
+            val service = instance ?: return@withContext null
+            val steamApps = service._steamApps ?: return@withContext service.appDao.findApp(appId)
+
+            val existing = service.appDao.findApp(appId)
+            if (existing?.receivedPICS == true && existing.name.isNotBlank()) {
+                return@withContext existing
+            }
+
+            try {
+                val tokenResult = steamApps.picsGetAccessTokens(
+                    appIds = listOf(appId),
+                    packageIds = emptyList(),
+                ).await()
+                val token = tokenResult.appTokens[appId] ?: 0L
+
+                val callback = steamApps.picsGetProductInfo(
+                    apps = listOf(PICSRequest(id = appId, accessToken = token)),
+                    packages = emptyList(),
+                ).await()
+
+                val product = callback.results
+                    .asSequence()
+                    .mapNotNull { it.apps[appId] }
+                    .firstOrNull()
+                    ?: return@withContext existing
+
+                val parsed = product.keyValues.generateSteamApp().copy(
+                    packageId = existing?.packageId ?: INVALID_PKG_ID,
+                    ownerAccountId = existing?.ownerAccountId ?: emptyList(),
+                    licenseFlags = existing?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                    receivedPICS = true,
+                    lastChangeNumber = product.changeNumber,
+                )
+                service.appDao.insert(parsed)
+                parsed
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to hydrate public Steam app $appId")
+                existing
+            }
         }
 
         fun getDownloadingAppInfoOf(appId: Int): DownloadingAppInfo? {
