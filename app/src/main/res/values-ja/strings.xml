@@ -1,5 +1,5 @@
 ﻿<resources>
-    <string name="app_name">GameNative</string>
+    <string name="app_name">GameNative LuaTools</string>
     <string name="login_user">ユーザーログイン</string>
     <string name="login_2fa">ツーファクター</string>
     <string name="home">ホーム</string>
@@ -2268,7 +2268,7 @@
     <string name="featured_status_preorder_body">予約購入してリリースに備えよう</string>
     <string name="featured_status_out_now_title">配信中</string>
     <string name="featured_status_out_now_body">現在利用可能</string>
-    <string name="tab_recommended">おすすめ</string>
+    <string name="tab_recommended">Explorer</string>
     <string name="gog_rec_empty">ゲームを追加またはプレイすると、ライブラリに基づいたGOGのおすすめが表示されます。</string>
     <!-- Steam achievements -->
     <string name="achievements">実績</string>
