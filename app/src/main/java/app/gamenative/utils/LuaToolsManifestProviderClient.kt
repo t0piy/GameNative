@@ -236,6 +236,97 @@ object LuaToolsManifestProviderClient {
     }
 
     /**
+     * DLC-aware FastFetch. Generic providers are tried first using the DLC AppID itself. If none
+     * yields usable manifest metadata and a lua.tools session exists, fall back to LuaTools'
+     * dedicated DLC generator endpoint. The returned Lua is still parsed by the restricted
+     * manifest parser: entitlement directives/keys/tickets are ignored.
+     */
+    suspend fun fastFetchDlc(
+        context: Context,
+        baseAppId: Int,
+        dlcAppId: Int,
+        gameName: String? = null,
+        allowCleartextDirect: Boolean = false,
+    ): FastFetchResult? = withContext(Dispatchers.IO) {
+        require(baseAppId > 0) { "Invalid base Steam app id" }
+        require(dlcAppId > 0 && dlcAppId != baseAppId) { "Invalid DLC Steam app id" }
+
+        if (SteamManifestOverrideStore.hasOverrides(context, dlcAppId)) {
+            return@withContext null
+        }
+
+        fastFetch(
+            context = context,
+            appId = dlcAppId,
+            gameName = gameName,
+            allowCleartextDirect = allowCleartextDirect,
+        )?.let { return@withContext it }
+
+        val credentials = ManifestProviderAuthManager.getCredentials(context)
+        if (credentials.luaToolsSession == null) return@withContext null
+
+        val imported = runCatching {
+            downloadLuaToolsDlcMetadata(
+                context = context,
+                baseAppId = baseAppId,
+                dlcAppId = dlcAppId,
+                gameName = gameName,
+            )
+        }.onFailure {
+            Timber.w(
+                it,
+                "lua.tools DLC metadata fallback failed base=%d dlc=%d",
+                baseAppId,
+                dlcAppId,
+            )
+        }.getOrNull() ?: return@withContext null
+
+        if (imported > 0) {
+            FastFetchResult(
+                sourceName = "lua.tools DLC",
+                importedCount = imported,
+            )
+        } else {
+            null
+        }
+    }
+
+    suspend fun downloadLuaToolsDlcMetadata(
+        context: Context,
+        baseAppId: Int,
+        dlcAppId: Int,
+        gameName: String? = null,
+    ): Int = withContext(Dispatchers.IO) {
+        require(baseAppId > 0) { "Invalid base Steam app id" }
+        require(dlcAppId > 0 && dlcAppId != baseAppId) { "Invalid DLC Steam app id" }
+
+        val bearer = ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
+        val game = gameName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "&game_name=${encode(it)}" }
+            .orEmpty()
+        val url =
+            "$LUA_TOOLS_API_BASE/api/dlc/generate?appid=$dlcAppId&base=$baseAppId$game"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $bearer")
+            .get()
+            .build()
+
+        val bytes = executeDownload(request)
+        SteamManifestOverrideStore.importArtifact(
+            context = context,
+            appId = dlcAppId,
+            fileName = "$dlcAppId.lua",
+            bytes = bytes,
+            provenance = ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.LuaToolsProvider,
+                sourceLabel = "lua.tools DLC",
+            ),
+        )
+    }
+
+    /**
      * Best-effort keyless direct-provider FastFetch helper.
      *
      * Existing manual overrides always win: if the user already imported/pinned anything for this
