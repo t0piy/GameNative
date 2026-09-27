@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">GameNative</string>
+    <string name="app_name">GameNative LuaTools</string>
     <string name="login_user">User Login</string>
     <string name="login_2fa">Two Factor</string>
     <string name="home">Home</string>
@@ -119,7 +119,7 @@
     <string name="downloads_cancel_confirm">Cancel download and delete files for %1$s?</string>
 
     <!-- Library Tabs -->
-    <string name="tab_recommended">Recommended</string>
+    <string name="tab_recommended">Explorer</string>
     <string name="gog_rec_empty">Add or play some games to get GOG recommendations based on your library.</string>
     <string name="tab_all">All</string>
     <string name="tab_favorites">Favorites</string>
@@ -134,6 +134,16 @@
     <string name="tab_amazon">Amazon</string>
     <string name="tab_installed">Installed</string>
     <string name="tab_local">Custom</string>
+    <string name="tab_luatools">LuaTools</string>
+    <string name="explorer_source_gog">GOG</string>
+    <string name="explorer_source_steam">Steam</string>
+    <string name="explorer_steam_search_hint">Search the Steam catalog</string>
+    <string name="explorer_steam_login_required">Sign in to Steam to search the global catalog.</string>
+    <string name="explorer_steam_indexing">Building the Steam catalog…</string>
+    <string name="explorer_steam_indexing_progress">Indexing %1$d / %2$d changes · %3$d games ready</string>
+    <string name="explorer_steam_empty">The Steam catalog has not been indexed yet.</string>
+    <string name="explorer_steam_indexed_count">%1$d Steam games indexed</string>
+    <string name="explorer_steam_appid">AppID %1$d</string>
     <string name="library_tab_with_count">%1$s (%2$d)</string>
     <string name="library_search_close">Close search</string>
     <string name="steam_collections_removed">A saved collection was removed in Steam and is no longer filtered.</string>
