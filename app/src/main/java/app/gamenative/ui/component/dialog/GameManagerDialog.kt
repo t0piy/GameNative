@@ -57,6 +57,8 @@ import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.internal.fakeAppInfo
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverride
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.StorageUtils
 import com.skydoves.landscapist.ImageOptions
 import com.skydoves.landscapist.coil.CoilImage
@@ -88,6 +90,8 @@ fun GameManagerDialog(
     val scrollState = rememberScrollState()
 
     val downloadableDepots = remember { mutableStateMapOf<Int, DepotInfo>() }
+    val manifestOverridesByApp =
+        remember { mutableStateMapOf<Int, Map<Int, SteamManifestOverride>>() }
     val allDownloadableApps = remember { mutableStateListOf<Pair<Int, DepotInfo>>() }
     val selectedAppIds = remember { mutableStateMapOf<Int, Boolean>() }
     val enabledAppIds = remember { mutableStateMapOf<Int, Boolean>() }
@@ -118,8 +122,30 @@ fun GameManagerDialog(
         allDownloadableApps.clear()
 
         // Get Downloadable Depots
-        val allPossibleDownloadableDepots = withContext(Dispatchers.IO) { SteamService.getDownloadableDepots(gameId) }
+        val allPossibleDownloadableDepots =
+            withContext(Dispatchers.IO) { SteamService.getDownloadableDepots(gameId) }
         downloadableDepots.putAll(allPossibleDownloadableDepots)
+
+        val namespaceAppIds = buildSet {
+            add(gameId)
+            allPossibleDownloadableDepots.values.forEach { depot ->
+                add(
+                    SteamManifestOverrideStore.owningAppId(
+                        parentAppId = gameId,
+                        dlcAppId = depot.dlcAppId,
+                        depotFromApp = depot.depotFromApp,
+                        invalidAppId = INVALID_APP_ID,
+                    ),
+                )
+            }
+        }
+        val loadedOverrides = withContext(Dispatchers.IO) {
+            namespaceAppIds.associateWith { namespaceAppId ->
+                SteamManifestOverrideStore.load(context, namespaceAppId)
+            }
+        }
+        manifestOverridesByApp.clear()
+        manifestOverridesByApp.putAll(loadedOverrides)
 
         // Get Optional DLC IDs
         val optionalDlcIds = allPossibleDownloadableDepots
@@ -175,18 +201,38 @@ fun GameManagerDialog(
             ?: depot.encryptedManifests[selectedBranch]
             ?: depot.manifests["public"]
 
+    fun overrideFor(depot: DepotInfo): SteamManifestOverride? {
+        val ownerAppId = SteamManifestOverrideStore.owningAppId(
+            parentAppId = gameId,
+            dlcAppId = depot.dlcAppId,
+            depotFromApp = depot.depotFromApp,
+            invalidAppId = INVALID_APP_ID,
+        )
+        return manifestOverridesByApp[ownerAppId]?.get(depot.depotId)
+            ?: if (ownerAppId != gameId) {
+                manifestOverridesByApp[gameId]?.get(depot.depotId)
+            } else {
+                null
+            }
+    }
+
+    fun installBytesFor(depot: DepotInfo): Long =
+        overrideFor(depot)?.sizeOnDisk
+            ?: manifestFor(depot)?.size
+            ?: 0L
+
+    fun downloadBytesFor(depot: DepotInfo): Long =
+        overrideFor(depot)?.sizeOnDisk
+            ?: SteamUtils.getDownloadBytes(manifestFor(depot))
+
     fun getSizeInfo(dlcAppId: Int): Pair<String, String> {
         if (dlcAppId == INVALID_APP_ID || dlcAppId == gameId) {
             val depotsForBaseGame = downloadableDepots.filter { (_, depot) ->
                 depot.dlcAppId == INVALID_APP_ID
             }
 
-            val installBytes = depotsForBaseGame.values.sumOf {
-                manifestFor(it)?.size ?: 0
-            }
-            val downloadBytes = depotsForBaseGame.values.sumOf {
-                SteamUtils.getDownloadBytes(manifestFor(it))
-            }
+            val installBytes = depotsForBaseGame.values.sumOf(::installBytesFor)
+            val downloadBytes = depotsForBaseGame.values.sumOf(::downloadBytesFor)
 
             return Pair(
                 StorageUtils.formatBinarySize(downloadBytes),
@@ -198,12 +244,8 @@ fun GameManagerDialog(
             depot.dlcAppId == dlcAppId
         }
 
-        val installBytes = depotsForDlc.values.sumOf {
-            manifestFor(it)?.size ?: 0
-        }
-        val downloadBytes = depotsForDlc.values.sumOf {
-            SteamUtils.getDownloadBytes(manifestFor(it))
-        }
+        val installBytes = depotsForDlc.values.sumOf(::installBytesFor)
+        val downloadBytes = depotsForDlc.values.sumOf(::downloadBytesFor)
 
         return Pair(
             StorageUtils.formatBinarySize(downloadBytes),
@@ -218,7 +260,7 @@ fun GameManagerDialog(
             downloadableDepots
                 .filter { (_, depot) ->
                     depot.dlcAppId == INVALID_APP_ID
-                }.values.sumOf { manifestFor(it)?.size ?: 0 }
+                }.values.sumOf(::installBytesFor)
         } else {
             0L
         }
@@ -227,9 +269,7 @@ fun GameManagerDialog(
             downloadableDepots
                 .filter { (_, depot) ->
                     depot.dlcAppId == INVALID_APP_ID
-                }.values.sumOf {
-                    SteamUtils.getDownloadBytes(manifestFor(it))
-                }
+                }.values.sumOf(::downloadBytesFor)
         } else {
             0L
         }
@@ -238,15 +278,13 @@ fun GameManagerDialog(
             .filter { (_, depot) ->
                 selectedAppIds[depot.dlcAppId] == true && enabledAppIds[depot.dlcAppId] == true
             }
-            .values.sumOf { manifestFor(it)?.size ?: 0 }
+            .values.sumOf(::installBytesFor)
 
         val selectedDownloadBytes = downloadableDepots
             .filter { (_, depot) ->
                 selectedAppIds[depot.dlcAppId] == true && enabledAppIds[depot.dlcAppId] == true
             }
-            .values.sumOf {
-                SteamUtils.getDownloadBytes(manifestFor(it))
-            }
+            .values.sumOf(::downloadBytesFor)
 
         return InstallSizeInfo(
             downloadSize = StorageUtils.formatBinarySize(baseGameDownloadBytes + selectedDownloadBytes),
