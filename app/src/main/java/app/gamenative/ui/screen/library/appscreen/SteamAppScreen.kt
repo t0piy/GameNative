@@ -61,6 +61,7 @@ import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.service.SteamService.Companion.getAppDirPath
 import app.gamenative.ui.component.dialog.MessageDialog
+import app.gamenative.ui.component.dialog.ManifestOverridesDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.state.MessageDialogState
 import app.gamenative.ui.data.Achievement
@@ -74,6 +75,7 @@ import app.gamenative.utils.LuaToolsManifestProviderClient
 import app.gamenative.utils.LuaToolsManifestSource
 import app.gamenative.utils.LuaToolsProviderTransport
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverride
 import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.StorageUtils
 import app.gamenative.workshop.WorkshopManager
@@ -836,6 +838,16 @@ class SteamAppScreen : BaseAppScreen() {
         var hasManifestOverrides by remember(gameId) {
             mutableStateOf(SteamManifestOverrideStore.hasOverrides(context, gameId))
         }
+        var showManifestOverridesDialog by remember(gameId) { mutableStateOf(false) }
+        var activeManifestOverrides by remember(gameId) {
+            mutableStateOf<List<SteamManifestOverride>>(emptyList())
+        }
+
+        ManifestOverridesDialog(
+            visible = showManifestOverridesDialog,
+            overrides = activeManifestOverrides,
+            onDismissRequest = { showManifestOverridesDialog = false },
+        )
         val manifestOverridePicker = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocument(),
         ) { uri ->
@@ -1150,6 +1162,19 @@ class SteamAppScreen : BaseAppScreen() {
                     showBranchDialog(gameId)
                 },
             ),
+            AppMenuOption(
+                AppOptionMenuType.ViewManifestOverrides,
+                onClick = {
+                    scope.launch {
+                        activeManifestOverrides = withContext(Dispatchers.IO) {
+                            SteamManifestOverrideStore.load(context, gameId)
+                                .values
+                                .sortedBy { it.depotId }
+                        }
+                        showManifestOverridesDialog = true
+                    }
+                },
+            ),
         )
 
         if (!isDownloadInProgress) {
@@ -1196,6 +1221,7 @@ class SteamAppScreen : BaseAppScreen() {
                             }
                             if (cleared) {
                                 hasManifestOverrides = false
+                                activeManifestOverrides = emptyList()
                                 SnackbarManager.show(
                                     context.getString(R.string.manifest_overrides_cleared),
                                 )
