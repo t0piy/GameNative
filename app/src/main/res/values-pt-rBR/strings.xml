@@ -2539,4 +2539,8 @@
     <string name="manifest_overrides_import_failed">Não foi possível importar os manifestos: %1$s</string>
     <string name="manifest_overrides_cleared">Substituições de manifesto removidas.</string>
     <string name="manifest_overrides_clear_failed">Não foi possível remover as substituições de manifesto.</string>
+    <string name="option_import_manifest_url">Importar manifesto por URL</string>
+    <string name="manifest_url_title">Importar fonte de manifesto</string>
+    <string name="manifest_url_label">URL HTTPS para um arquivo Lua ou .manifest</string>
+    <string name="manifest_url_import">Importar</string>
 </resources>
