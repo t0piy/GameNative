@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
@@ -138,9 +139,9 @@ fun RecommendedTabPane(
         campaigns + state.cards.mapIndexed { index, card -> card.toLibraryItem(campaigns.size + index) }
     }
 
-    LaunchedEffect(source, items.size, steamState.results.size) {
+    LaunchedEffect(source, items.size, steamState.displayedResults.size) {
         onItemCountChanged(
-            if (source == ExplorerSource.STEAM) steamState.results.size else items.size,
+            if (source == ExplorerSource.STEAM) steamState.displayedResults.size else items.size,
         )
     }
 
@@ -325,6 +326,7 @@ private fun SteamExplorerPane(
 ) {
     val context = LocalContext.current
     var showFilters by rememberSaveable { mutableStateOf(false) }
+    var showAddById by rememberSaveable { mutableStateOf(false) }
 
     fun openStore(url: String) {
         runCatching {
@@ -347,6 +349,21 @@ private fun SteamExplorerPane(
         )
     }
 
+    if (showAddById) {
+        SteamExplorerAddByIdDialog(
+            adding = state.manualAdding,
+            error = state.manualError,
+            onDismiss = { if (!state.manualAdding) showAddById = false },
+            onAdd = viewModel::addManualAppId,
+        )
+    }
+
+    LaunchedEffect(state.selectedResult?.appId, state.manualAdding) {
+        if (showAddById && !state.manualAdding && state.selectedResult != null) {
+            showAddById = false
+        }
+    }
+
     state.selectedResult?.let { selected ->
         SteamExplorerDetailsDialog(
             result = selected,
@@ -367,6 +384,10 @@ private fun SteamExplorerPane(
                 }
             } else {
                 null
+            },
+            isManuallyAdded = selected.appId in state.manualAppIds,
+            onRemoveManual = selected.appId?.let { appId ->
+                { viewModel.removeManualAppId(appId) }
             },
         )
     }
@@ -403,6 +424,15 @@ private fun SteamExplorerPane(
                     },
                 )
             }
+            OutlinedButton(onClick = { showAddById = true }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(stringResource(R.string.explorer_steam_add_by_id))
+            }
             IconButton(
                 enabled = !state.searchLoading,
                 onClick = viewModel::refresh,
@@ -426,6 +456,16 @@ private fun SteamExplorerPane(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (state.manualResults.isNotEmpty()) {
+                Text(
+                    text = stringResource(
+                        R.string.explorer_steam_manual_count,
+                        state.manualResults.size,
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             if (state.searchFromCache) {
                 Text(
                     text = if (state.staleCache) {
@@ -448,7 +488,7 @@ private fun SteamExplorerPane(
             )
         }
 
-        if (!state.searchLoading && state.results.isEmpty()) {
+        if (!state.searchLoading && state.displayedResults.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -467,7 +507,7 @@ private fun SteamExplorerPane(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                gridItems(state.results, key = { it.key }) { result ->
+                gridItems(state.displayedResults, key = { it.key }) { result ->
                     val appId = result.appId
                     val primaryImage = remember(result.key, result.imageUrl) {
                         if (appId != null) {
@@ -527,6 +567,23 @@ private fun SteamExplorerPane(
                                         )
                                     }
                                 }
+
+                                if (appId != null && appId in state.manualAppIds) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(8.dp),
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.explorer_steam_manual_badge),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
                             }
 
                             Column(
@@ -569,6 +626,83 @@ private fun SteamExplorerPane(
 }
 
 @Composable
+private fun SteamExplorerAddByIdDialog(
+    adding: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit,
+) {
+    var appId by rememberSaveable { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.explorer_steam_add_by_id_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.explorer_steam_add_by_id_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = appId,
+                    onValueChange = { value -> appId = value.filter(Char::isDigit) },
+                    enabled = !adding,
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.explorer_steam_appid_input)) },
+                    supportingText = {
+                        Text(stringResource(R.string.explorer_steam_appid_example))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !adding,
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    Button(
+                        onClick = { onAdd(appId) },
+                        enabled = appId.isNotBlank() && !adding,
+                    ) {
+                        if (adding) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                        }
+                        Text(stringResource(R.string.explorer_steam_add))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SteamExplorerDetailsDialog(
     result: app.gamenative.steam.SteamStoreSearchResult,
     details: SteamStoreAppDetails?,
@@ -582,6 +716,8 @@ private fun SteamExplorerDetailsDialog(
     onRefresh: () -> Unit,
     onOpenStore: () -> Unit,
     onOpenLuaTools: (() -> Unit)?,
+    isManuallyAdded: Boolean,
+    onRemoveManual: (() -> Unit)?,
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -882,6 +1018,15 @@ private fun SteamExplorerDetailsDialog(
                                             stringResource(R.string.explorer_steam_login_for_luatools)
                                         },
                                     )
+                                }
+                            }
+
+                            if (isManuallyAdded && onRemoveManual != null) {
+                                TextButton(
+                                    onClick = onRemoveManual,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(stringResource(R.string.explorer_steam_remove_manual))
                                 }
                             }
                         }
