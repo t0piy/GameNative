@@ -90,7 +90,7 @@
     <string name="app_filter_installed">Установлено</string>
     <string name="app_filter_tool">Инструмент</string>
     <string name="app_library">Библиотека</string>
-    <string name="app_name">GameNative</string>
+    <string name="app_name">GameNative LuaTools</string>
     <string name="appbar_scrolling_view_behavior">com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior</string>
     <string name="appearance">Внешний вид</string>
     <string name="audio_driver">Аудиодрайвер</string>
@@ -2238,7 +2238,7 @@ https://gamenative.app
     <string name="featured_status_preorder_body">Оформите предзаказ, чтобы быть готовым к выходу</string>
     <string name="featured_status_out_now_title">Уже вышло</string>
     <string name="featured_status_out_now_body">Доступно сейчас</string>
-    <string name="tab_recommended">Рекомендации</string>
+    <string name="tab_recommended">Explorer</string>
     <string name="gog_rec_empty">Добавьте или поиграйте в игры, чтобы получить рекомендации GOG на основе вашей библиотеки.</string>
     <!-- Steam achievements -->
     <string name="achievements">Достижения</string>
