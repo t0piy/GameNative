@@ -352,15 +352,17 @@ object SteamManifestOverrideStore {
         return null
     }
 
-    private fun skipField(bytes: ByteArray, start: Int, end: Int, wire: Int): Int? = when (wire) {
-        1 -> (start + 8).takeIf { it <= end }
-        2 -> {
-            val length = readVarint(bytes, start, end) ?: return null
-            val next = length.next + length.value.toLong()
-            next.takeIf { it <= end.toLong() }?.toInt()
+    private fun skipField(bytes: ByteArray, start: Int, end: Int, wire: Int): Int? {
+        return when (wire) {
+            1 -> (start + 8).takeIf { it <= end }
+            2 -> {
+                val length = readVarint(bytes, start, end) ?: return null
+                val next = length.next.toLong() + length.value.toLong()
+                next.takeIf { it <= end.toLong() }?.toInt()
+            }
+            5 -> (start + 4).takeIf { it <= end }
+            else -> null
         }
-        5 -> (start + 4).takeIf { it <= end }
-        else -> null
     }
 
     private fun readU32Le(bytes: ByteArray, offset: Int): Long? {
