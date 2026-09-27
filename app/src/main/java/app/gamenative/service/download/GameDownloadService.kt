@@ -209,6 +209,20 @@ object GameDownloadService {
             }.awaitAll()
         }.filterNotNull()
 
+        // Resolution is all-or-nothing for a selected install plan. Starting the native engine
+        // with only the small/shared depots makes a failed game install consume bandwidth and can
+        // leave a misleading partial state. Resolve every selected depot first, then transfer.
+        val unresolvedDepotIds = unresolvedSelectedDepotIds(
+            selectedDepotIds = selectedDepots.keys,
+            completedDepotIds = resolvedDepots.mapTo(linkedSetOf()) { it.depotId },
+        )
+        if (unresolvedDepotIds.isNotEmpty()) {
+            throw DownloadFailedException(
+                "Steam did not authorize or resolve required depot(s): " +
+                    unresolvedDepotIds.joinToString(", "),
+            )
+        }
+
         // A directly imported .manifest is staged only after resolveDepotForDownload() has
         // successfully obtained the depot key from Steam. The Rust engine then validates the
         // manifest's own depot/GID metadata before trusting the cache.
