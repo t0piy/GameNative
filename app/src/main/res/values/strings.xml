@@ -2699,4 +2699,14 @@
     <string name="settings_manifest_fast_fetch_cleartext_subtitle">Allows automatic FastFetch from direct providers without HTTPS, such as Ryuu's legacy endpoint. Enable only if you accept HTTP integrity risk.</string>
     <string name="manifest_fast_fetch_checking">Checking alternate manifest providers…</string>
     <string name="manifest_fast_fetch_used">Imported manifests from %1$s; starting Steam download.</string>
+    <string name="manifest_provider_credentials_settings_title">Provider credentials</string>
+    <string name="manifest_provider_credentials_settings_subtitle">Configure a lua.tools session and Hubcap key for authenticated providers.</string>
+    <string name="manifest_provider_credentials_title">Provider credentials</string>
+    <string name="manifest_provider_credentials_description">Credentials are encrypted with a non-exportable Android Keystore key. Ryuu and Sushi do not require these fields.</string>
+    <string name="manifest_provider_luatools_access_token">lua.tools access token</string>
+    <string name="manifest_provider_luatools_refresh_token">lua.tools refresh token</string>
+    <string name="manifest_provider_hubcap_api_key">Hubcap API key</string>
+    <string name="manifest_provider_credentials_saving">Saving and validating session…</string>
+    <string name="manifest_provider_credentials_save">Save</string>
+    <string name="manifest_provider_credentials_clear">Clear</string>
 </resources>
