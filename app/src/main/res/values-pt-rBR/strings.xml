@@ -2543,4 +2543,12 @@
     <string name="manifest_url_title">Importar fonte de manifesto</string>
     <string name="manifest_url_label">URL HTTPS para um arquivo Lua ou .manifest</string>
     <string name="manifest_url_import">Importar</string>
+    <string name="option_find_manifest_providers">Buscar providers de manifesto</string>
+    <string name="manifest_providers_title">Providers de manifesto</string>
+    <string name="manifest_providers_checking">Consultando providers…</string>
+    <string name="manifest_providers_none">Nenhum provider disponível para este AppID.</string>
+    <string name="manifest_provider_direct">Direto</string>
+    <string name="manifest_provider_proxy_auth">Requer login no lua.tools</string>
+    <string name="manifest_provider_hubcap_key">Requer chave do Hubcap</string>
+    <string name="manifest_provider_downloading">Baixando de %1$s…</string>
 </resources>
