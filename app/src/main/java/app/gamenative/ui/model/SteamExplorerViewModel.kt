@@ -6,20 +6,25 @@ import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamCatalogEntry
 import app.gamenative.db.dao.SteamCatalogDao
+import app.gamenative.db.dao.SteamSearchCacheDao
 import app.gamenative.service.SteamService
 import app.gamenative.steam.SteamCatalogRepository
+import app.gamenative.steam.SteamStoreFilterCatalog
+import app.gamenative.steam.SteamStoreFilterOption
+import app.gamenative.steam.SteamStoreSearchFilters
+import app.gamenative.steam.SteamStoreSearchResult
+import app.gamenative.steam.SteamStoreSort
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,56 +32,114 @@ import kotlinx.coroutines.withContext
 @HiltViewModel
 class SteamExplorerViewModel @Inject constructor(
     private val steamCatalogDao: SteamCatalogDao,
+    private val steamSearchCacheDao: SteamSearchCacheDao,
 ) : ViewModel() {
     data class UiState(
         val query: String = "",
-        val games: List<SteamCatalogEntry> = emptyList(),
-        val catalogSize: Int = 0,
-        val syncState: SteamCatalogRepository.SyncState = SteamCatalogRepository.SyncState(),
+        val results: List<SteamStoreSearchResult> = emptyList(),
+        val totalResults: Int = 0,
+        val filters: SteamStoreSearchFilters = SteamStoreSearchFilters(),
+        val filterCatalog: SteamStoreFilterCatalog = SteamStoreFilterCatalog(),
+        val filterCatalogLoading: Boolean = true,
+        val searchLoading: Boolean = false,
+        val searchFromCache: Boolean = false,
+        val staleCache: Boolean = false,
+        val error: String? = null,
+        val filterError: String? = null,
         val openingAppId: Int? = null,
     )
 
     private val query = MutableStateFlow("")
+    private val filters = MutableStateFlow(SteamStoreSearchFilters())
+    private val refreshVersion = MutableStateFlow(0)
+    private val refreshCounter = AtomicInteger(0)
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
 
     init {
+        loadFilterCatalog()
         collectSearch()
-        viewModelScope.launch {
-            steamCatalogDao.observeCount().collect { count ->
-                _state.update { it.copy(catalogSize = count) }
-            }
-        }
-        viewModelScope.launch {
-            SteamCatalogRepository.syncState.collect { sync ->
-                _state.update { it.copy(syncState = sync) }
-            }
-        }
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     private fun collectSearch() {
         viewModelScope.launch {
-            query
-                .debounce(250)
-                .distinctUntilChanged()
-                .flatMapLatest { rawQuery ->
-                    val normalized = rawQuery.trim()
-                    flow {
-                        if (normalized.length >= 2) {
-                            val remote = withContext(Dispatchers.IO) {
-                                SteamCatalogRepository.searchStore(normalized)
-                            }
-                            if (remote.isNotEmpty()) {
-                                steamCatalogDao.insertAll(remote)
-                            }
-                        }
-                        emitAll(steamCatalogDao.search(normalized))
-                    }
-                }
-                .collect { games ->
-                    _state.update { it.copy(games = games) }
-                }
+            var handledRefreshVersion = 0
+            combine(
+                query.debounce(300).distinctUntilChanged(),
+                filters.distinctUntilChanged(),
+                refreshVersion,
+            ) { currentQuery, currentFilters, version ->
+                Triple(currentQuery, currentFilters, version)
+            }.collect { (currentQuery, currentFilters, version) ->
+                val forceRefresh = version != handledRefreshVersion
+                handledRefreshVersion = version
+                runSearch(currentQuery, currentFilters, forceRefresh)
+            }
+        }
+    }
+
+    private suspend fun runSearch(
+        currentQuery: String,
+        currentFilters: SteamStoreSearchFilters,
+        forceRefresh: Boolean,
+    ) {
+        _state.update {
+            it.copy(
+                searchLoading = true,
+                error = null,
+                filters = currentFilters,
+            )
+        }
+
+        val outcome = withContext(Dispatchers.IO) {
+            SteamCatalogRepository.searchStore(
+                query = currentQuery,
+                filters = currentFilters,
+                cacheDao = steamSearchCacheDao,
+                forceRefresh = forceRefresh,
+            )
+        }
+
+        val appRows = outcome.results.mapNotNull { result ->
+            val appId = result.appId ?: return@mapNotNull null
+            SteamCatalogEntry(appId = appId, name = result.name)
+        }
+        if (appRows.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                steamCatalogDao.insertAll(appRows)
+            }
+        }
+
+        _state.update {
+            it.copy(
+                results = outcome.results,
+                totalResults = outcome.totalCount,
+                searchLoading = false,
+                searchFromCache = outcome.fromCache,
+                staleCache = outcome.staleCache,
+                error = outcome.error,
+                filters = currentFilters,
+            )
+        }
+    }
+
+    private fun loadFilterCatalog(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            _state.update { it.copy(filterCatalogLoading = true, filterError = null) }
+            val outcome = withContext(Dispatchers.IO) {
+                SteamCatalogRepository.loadFilterCatalog(
+                    cacheDao = steamSearchCacheDao,
+                    forceRefresh = forceRefresh,
+                )
+            }
+            _state.update {
+                it.copy(
+                    filterCatalog = outcome.catalog,
+                    filterCatalogLoading = false,
+                    filterError = outcome.error,
+                )
+            }
         }
     }
 
@@ -85,30 +148,91 @@ class SteamExplorerViewModel @Inject constructor(
         query.value = value
     }
 
-    fun refresh(forceFull: Boolean = false) {
-        SteamService.refreshSteamCatalog(forceFull)
+    fun refresh() {
+        refreshVersion.value = refreshCounter.incrementAndGet()
+        loadFilterCatalog(forceRefresh = true)
     }
 
-    fun open(entry: SteamCatalogEntry, onReady: (LibraryItem) -> Unit) {
-        if (_state.value.openingAppId != null) return
-        _state.update { it.copy(openingAppId = entry.appId) }
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                SteamService.hydratePublicAppInfo(entry.appId)
+    fun toggleOption(option: SteamStoreFilterOption) {
+        if (option.param == "tags") {
+            cycleTag(option.value)
+            return
+        }
+        val next = filters.value.toggle(option)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    /**
+     * Tag state cycles Off -> Include -> Exclude -> Off, mirroring Steam's include/not controls.
+     */
+    fun cycleTag(tagId: String) {
+        val next = filters.value.cycleTag(tagId)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun setSort(sort: SteamStoreSort) {
+        val next = filters.value.copy(sort = sort)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun setMaxPrice(value: String?) {
+        val normalized = value?.trim()?.takeIf { it.isNotEmpty() }
+        val next = filters.value.copy(maxPrice = normalized)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun setSpecialsOnly(value: Boolean) {
+        val next = filters.value.copy(specialsOnly = value)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun setHideFreeToPlay(value: Boolean) {
+        val next = filters.value.copy(hideFreeToPlay = value)
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun clearFilters() {
+        val next = SteamStoreSearchFilters()
+        filters.value = next
+        _state.update { it.copy(filters = next) }
+    }
+
+    fun clearCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamCatalogRepository.clearStoreCache(steamSearchCacheDao)
+            withContext(Dispatchers.Main) {
+                refresh()
             }
-            _state.update { it.copy(openingAppId = null) }
-            onReady(entry.toLibraryItem())
         }
     }
 
-    private fun SteamCatalogEntry.toLibraryItem(): LibraryItem = LibraryItem(
-        appId = "${GameSource.STEAM.name}_$appId",
-        name = name,
-        iconHash = iconHash,
-        capsuleImageUrl = capsuleUrl,
-        headerImageUrl = headerUrl,
-        heroImageUrl = heroUrl,
-        gameSource = GameSource.STEAM,
-        isInstalled = SteamService.isAppInstalled(appId),
-    )
+    fun openApp(result: SteamStoreSearchResult, onReady: (LibraryItem) -> Unit) {
+        val appId = result.appId ?: return
+        if (_state.value.openingAppId != null) return
+        _state.update { it.copy(openingAppId = appId) }
+        viewModelScope.launch {
+            val hydrated = withContext(Dispatchers.IO) {
+                SteamService.hydratePublicAppInfo(appId)
+            }
+            _state.update { it.copy(openingAppId = null) }
+            onReady(
+                LibraryItem(
+                    appId = "${GameSource.STEAM.name}_$appId",
+                    name = hydrated?.name?.takeIf { it.isNotBlank() } ?: result.name,
+                    iconHash = hydrated?.clientIconHash?.ifBlank { hydrated.iconHash }.orEmpty(),
+                    capsuleImageUrl = hydrated?.getCapsuleUrl().orEmpty().ifBlank { result.imageUrl },
+                    headerImageUrl = hydrated?.headerUrl.orEmpty().ifBlank { result.imageUrl },
+                    heroImageUrl = hydrated?.getHeroUrl().orEmpty().ifBlank { result.imageUrl },
+                    gameSource = GameSource.STEAM,
+                    isInstalled = SteamService.isAppInstalled(appId),
+                ),
+            )
+        }
+    }
 }
