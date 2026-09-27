@@ -43,6 +43,7 @@ data class SteamManifestOverride(
     val manifestId: Long,
     val sizeOnDisk: Long? = null,
     val provenance: ManifestOverrideProvenance? = null,
+    val namespaceAppId: Int? = null,
 )
 
 /**
@@ -408,6 +409,7 @@ object SteamManifestOverrideStore {
             }.getOrDefault(emptyMap()).forEach { (depotId, override) ->
                 overrides[depotId] = override.copy(
                     provenance = provenance[provenanceKey(override)],
+                    namespaceAppId = appId,
                 )
             }
         }
@@ -421,6 +423,7 @@ object SteamManifestOverrideStore {
                 overrideFromManifestFile(file)?.let { override ->
                     overrides[override.depotId] = override.copy(
                         provenance = provenance[provenanceKey(override)],
+                        namespaceAppId = appId,
                     )
                 }
             }
