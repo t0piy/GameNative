@@ -2567,4 +2567,9 @@
     <string name="manifest_provider_credentials_saving">Salvando e validando sessão…</string>
     <string name="manifest_provider_credentials_save">Salvar</string>
     <string name="manifest_provider_credentials_clear">Limpar</string>
+    <string name="manifest_provider_luatools_login_code">Código de login do lua.tools</string>
+    <string name="manifest_provider_luatools_sign_in">Entrar com código</string>
+    <string name="manifest_provider_luatools_signing_in">Entrando…</string>
+    <string name="manifest_provider_luatools_login_success">Sessão lua.tools configurada.</string>
+    <string name="manifest_provider_credentials_cleared">Credenciais removidas.</string>
 </resources>
