@@ -436,7 +436,7 @@ object SteamManifestOverrideStore {
         if (fileFor(context, appId).isFile) return true
         return manifestRoot(context, appId).listFiles()
             ?.any { it.isFile && it.name.endsWith(".manifest", ignoreCase = true) }
-            == true
+            ?: false
     }
 
     fun find(context: Context, appId: Int, depotId: Int): SteamManifestOverride? =
