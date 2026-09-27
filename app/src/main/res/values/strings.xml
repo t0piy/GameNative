@@ -2728,4 +2728,5 @@
     <string name="manifest_override_source_luatools">lua.tools provider</string>
     <string name="manifest_override_source_hubcap">Hubcap</string>
     <string name="manifest_override_source_unknown">Unknown source</string>
+    <string name="manifest_overrides_info">These GIDs override manifest selection before download. Depot authorization and the depot key are still obtained normally from Steam.</string>
 </resources>
