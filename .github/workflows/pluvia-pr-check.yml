@@ -44,6 +44,28 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Modern debug bundle
+        run: ./gradlew :app:bundleModernDebug
+
+      - name: Build universal Modern debug APK
+        run: |
+          java -jar tools/bundletool-all-1.17.2.jar build-apks \
+            --bundle=app/build/outputs/bundle/modernDebug/app-modern-debug.aab \
+            --output=app-modern-debug.apks \
+            --mode=universal \
+            --overwrite
+          unzip -p app-modern-debug.apks universal.apk > GameNative-modern-debug.apk
+          test -s GameNative-modern-debug.apk
+          ls -lh GameNative-modern-debug.apk
+
+      - name: Upload Modern debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameNative-modern-debug
+          if-no-files-found: error
+          path: GameNative-modern-debug.apk
+
       - name: Run unit tests (${{ matrix.variant }})
         timeout-minutes: 30
         run: |
@@ -81,27 +103,6 @@ jobs:
           sleep 2
           kill "$tail_pid" || true
           exit $status
-
-      - name: Build Modern debug bundle
-        run: ./gradlew :app:bundleModernDebug
-
-      - name: Build universal Modern debug APK
-        run: |
-          java -jar tools/bundletool-all-1.17.2.jar build-apks \
-            --bundle=app/build/outputs/bundle/modernDebug/app-modern-debug.aab \
-            --output=app-modern-debug.apks \
-            --mode=universal \
-            --overwrite
-          unzip -p app-modern-debug.apks universal.apk > GameNative-modern-debug.apk
-          test -s GameNative-modern-debug.apk
-          ls -lh GameNative-modern-debug.apk
-
-      - name: Upload Modern debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: GameNative-modern-debug
-          if-no-files-found: error
-          path: GameNative-modern-debug.apk
 
       - name: Upload test reports (${{ matrix.variant }})
         if: always()
