@@ -70,6 +70,7 @@ import app.gamenative.ui.enums.DialogType
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.MarkerUtils
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.StorageUtils
 import app.gamenative.workshop.WorkshopManager
 import app.gamenative.NetworkMonitor
@@ -828,6 +829,38 @@ class SteamAppScreen : BaseAppScreen() {
         val appInfo = SteamService.getAppInfoOf(gameId) ?: return emptyList()
         val isDownloadInProgress = SteamService.getDownloadingAppInfoOf(gameId) != null
         val scope = rememberCoroutineScope()
+        var hasManifestOverrides by remember(gameId) {
+            mutableStateOf(SteamManifestOverrideStore.fileFor(context, gameId).isFile)
+        }
+        val manifestOverridePicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) {
+                scope.launch {
+                    try {
+                        val count = withContext(Dispatchers.IO) {
+                            val text = context.contentResolver.openInputStream(uri)
+                                ?.bufferedReader(Charsets.UTF_8)
+                                ?.use { it.readText() }
+                                ?: error("Could not read selected file")
+                            SteamManifestOverrideStore.saveLua(context, gameId, text)
+                        }
+                        hasManifestOverrides = true
+                        SnackbarManager.show(
+                            context.getString(R.string.manifest_overrides_imported, count),
+                        )
+                    } catch (e: Exception) {
+                        Timber.w(e, "Manifest override import failed for app $gameId")
+                        SnackbarManager.show(
+                            context.getString(
+                                R.string.manifest_overrides_import_failed,
+                                e.message ?: e.javaClass.simpleName,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
         val familyGroupId by SteamService.familyGroupIdFlow.collectAsState()
         val familyPreferredCopyDataVersion by SteamService.familyPreferredCopyDataVersion.collectAsState()
         var showPreferredCopyMenuOption by remember(gameId) { mutableStateOf(false) }
@@ -855,6 +888,37 @@ class SteamAppScreen : BaseAppScreen() {
                 },
             ),
         )
+
+        if (!isDownloadInProgress) {
+            options += AppMenuOption(
+                AppOptionMenuType.ImportManifestOverrides,
+                onClick = {
+                    manifestOverridePicker.launch(arrayOf("*/*"))
+                },
+            )
+            if (hasManifestOverrides) {
+                options += AppMenuOption(
+                    AppOptionMenuType.ClearManifestOverrides,
+                    onClick = {
+                        scope.launch {
+                            val cleared = withContext(Dispatchers.IO) {
+                                SteamManifestOverrideStore.clear(context, gameId)
+                            }
+                            if (cleared) {
+                                hasManifestOverrides = false
+                                SnackbarManager.show(
+                                    context.getString(R.string.manifest_overrides_cleared),
+                                )
+                            } else {
+                                SnackbarManager.show(
+                                    context.getString(R.string.manifest_overrides_clear_failed),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+        }
 
         if (!isInstalled || isDownloadInProgress) {
             return options
@@ -1156,11 +1220,16 @@ class SteamAppScreen : BaseAppScreen() {
                     val depots = SteamService.getDownloadableDepots(gameId, language)
                     Timber.i("There are ${depots.size} depots belonging to ${libraryItem.appId}")
                     val branch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
+                    val manifestOverrides = SteamManifestOverrideStore.load(context, gameId)
                     val availableBytes = StorageUtils.getAvailableSpaceForUncreatedPath(SteamService.getAppDirPath(gameId))
                     val downloadBytes = depots.values.sumOf {
                         SteamUtils.getDownloadBytes(it.manifests[branch])
                     }
-                    val installBytes = depots.values.sumOf { it.manifests[branch]?.size ?: 0 }
+                    val installBytes = depots.values.sumOf { depot ->
+                        manifestOverrides[depot.depotId]?.sizeOnDisk
+                            ?: depot.manifests[branch]?.size
+                            ?: 0L
+                    }
                     InstallSizeInfo(
                         downloadSize = StorageUtils.formatBinarySize(downloadBytes),
                         installSize = StorageUtils.formatBinarySize(installBytes),
