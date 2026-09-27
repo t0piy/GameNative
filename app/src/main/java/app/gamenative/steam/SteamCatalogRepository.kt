@@ -7,7 +7,14 @@ import app.gamenative.enums.AppType
 import app.gamenative.utils.generateSteamApp
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.PICSRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.SteamApps
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,11 +39,60 @@ object SteamCatalogRepository {
     )
 
     private const val BATCH_SIZE = 128
+    private const val STORE_SEARCH_LIMIT = 100
+
+    private val storeHttp = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
 
     private val syncMutex = Mutex()
     private val syncRequested = AtomicBoolean(false)
     private val _syncState = MutableStateFlow(SyncState())
     val syncState = _syncState.asStateFlow()
+
+    /**
+     * Global Steam Store search used as the discovery fallback. It does not need a Web API key;
+     * the authenticated Steam session is still used when opening a result to obtain PICS metadata.
+     */
+    suspend fun searchStore(query: String): List<SteamCatalogEntry> {
+        val term = query.trim()
+        if (term.length < 2) return emptyList()
+
+        val language = Locale.getDefault().language.ifBlank { "english" }
+        val country = Locale.getDefault().country.ifBlank { "US" }
+        val encoded = URLEncoder.encode(term, StandardCharsets.UTF_8.name())
+        val url =
+            "https://store.steampowered.com/api/storesearch/" +
+                "?term=$encoded&l=$language&cc=$country&category1=998"
+
+        return runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "GameNative-LuaTools")
+                .build()
+            storeHttp.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use emptyList()
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) return@use emptyList()
+                val items = JSONObject(body).optJSONArray("items") ?: return@use emptyList()
+                buildList {
+                    for (index in 0 until minOf(items.length(), STORE_SEARCH_LIMIT)) {
+                        val item = items.optJSONObject(index) ?: continue
+                        if (item.optString("type", "app") != "app") continue
+                        val appId = item.optInt("id", 0)
+                        val name = item.optString("name").trim()
+                        if (appId > 0 && name.isNotBlank()) {
+                            add(SteamCatalogEntry(appId = appId, name = name))
+                        }
+                    }
+                }
+            }
+        }.onFailure {
+            Timber.w(it, "Steam Store search failed for query=$term")
+        }.getOrDefault(emptyList())
+    }
 
     suspend fun sync(
         steamApps: SteamApps,
