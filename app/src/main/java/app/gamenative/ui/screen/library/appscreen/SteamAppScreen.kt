@@ -934,7 +934,7 @@ class SteamAppScreen : BaseAppScreen() {
                                     }
                                     TextButton(
                                         modifier = Modifier.fillMaxWidth(),
-                                        enabled = source.available &&
+                                        enabled = source.canAttemptDownload &&
                                             downloadingManifestProvider == null,
                                         onClick = {
                                             when (source.transport) {
