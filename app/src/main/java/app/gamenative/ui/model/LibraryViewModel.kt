@@ -1107,6 +1107,12 @@ class LibraryViewModel @Inject constructor(
             val gogInstalledCount = filteredGOGGames.count { it.isInstalled }
             val epicInstalledCount = filteredEpicGames.count { it.isInstalled }
             val amazonInstalledCount = filteredAmazonGames.count { it.isInstalled }
+            val luaToolsInstalledCount =
+                appList.count { downloadDirectorySet.contains(SteamService.getAppDirName(it)) } +
+                    gogGameList.count { it.isInstalled } +
+                    epicGameList.count { it.isInstalled } +
+                    amazonGameList.count { it.isInstalled } +
+                    customEntries.size
             // Save game counts for skeleton loaders (only when not searching, to get accurate counts)
             // This needs to happen before filtering by source, so we save the total counts
             if (currentState.searchQuery.isEmpty()) {
@@ -1325,6 +1331,7 @@ class LibraryViewModel @Inject constructor(
                     gogCount = if (currentState.showGOGInLibrary && GOGService.hasStoredCredentials(context)) gogEntries.size else 0,
                     epicCount = if (currentState.showEpicInLibrary && EpicService.hasStoredCredentials(context)) epicEntries.size else 0,
                     amazonCount = if (currentState.showAmazonInLibrary && AmazonService.hasStoredCredentials(context)) amazonEntries.size else 0,
+                    luaToolsCount = luaToolsInstalledCount,
                     localCount = if (currentState.showCustomGamesInLibrary) customEntries.size else 0,
                     steamCollectionCounts = steamCollectionCounts,
                     curatedListCounts = curatedListCounts,
