@@ -7,6 +7,7 @@ import app.gamenative.data.SteamApp
 import app.gamenative.service.SteamService
 import app.gamenative.utils.DepotManifestFiles
 import app.gamenative.utils.LocaleHelper
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.generateSteamApp
 import `in`.dragonbra.javasteam.enums.EResult
 import `in`.dragonbra.javasteam.steam.cdn.Server
@@ -492,6 +493,20 @@ object GameDownloadService {
         branch: String,
         branchPassword: String?,
     ): Long {
+        // LuaTools-style manifest overrides only replace the requested manifest GID.
+        // Entitlement is still enforced immediately afterwards by getDepotDecryptionKey(),
+        // so an override cannot grant access to a depot the Steam account does not own.
+        SteamService.instance?.applicationContext?.let { context ->
+            SteamManifestOverrideStore.find(context, appId, depotId)?.let { override ->
+                Timber.tag(TAG).i(
+                    "Depot $depotId: using imported manifest override %s for app %d",
+                    java.lang.Long.toUnsignedString(override.manifestId),
+                    appId,
+                )
+                return override.manifestId
+            }
+        }
+
         depot.manifests[branch]?.gid?.takeIf { it != 0L }?.let { return it }
 
         // Shared depot carrying no manifests of its own (e.g. depot 228990 Steamworks
