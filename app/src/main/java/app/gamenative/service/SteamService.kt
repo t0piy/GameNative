@@ -1376,8 +1376,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                         ).await()
 
                         callback.results.forEach { result ->
-                            result.apps.forEach { (dlcId, product) ->
-                                if (dlcId !in dlcIds) return@forEach
+                            result.apps.forEach appLoop@{ (dlcId, product) ->
+                                if (dlcId !in dlcIds) return@appLoop
                                 val existing = service.appDao.findApp(dlcId)
                                 val parsed = product.keyValues.generateSteamApp().copy(
                                     packageId = existing?.packageId ?: INVALID_PKG_ID,
