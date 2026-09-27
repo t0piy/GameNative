@@ -57,11 +57,20 @@ object SteamCatalogRepository {
         val error: String? = null,
     )
 
+    data class AppDetailsOutcome(
+        val details: SteamStoreAppDetails? = null,
+        val fromCache: Boolean = false,
+        val staleCache: Boolean = false,
+        val error: String? = null,
+    )
+
     private const val BATCH_SIZE = 128
     private const val SEARCH_CACHE_FRESH_MS = 10 * 60 * 1000L
     private const val SEARCH_CACHE_STALE_MS = 7 * 24 * 60 * 60 * 1000L
     private const val FILTER_CACHE_FRESH_MS = 24 * 60 * 60 * 1000L
+    private const val DETAILS_CACHE_FRESH_MS = 6 * 60 * 60 * 1000L
     private const val FILTER_CACHE_STALE_MS = 14 * 24 * 60 * 60 * 1000L
+    private const val DETAILS_CACHE_STALE_MS = 14 * 24 * 60 * 60 * 1000L
     private const val CACHE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000L
     private const val CACHE_MAX_ENTRIES = 120
     private const val FILTER_CACHE_KEY_PREFIX = "steam-store:filters:v2"
@@ -195,6 +204,72 @@ object SteamCatalogRepository {
                     catalog = SteamStoreSearchParser.parseFilterCatalog("", fetchedAt = now),
                     error = e.message ?: e.javaClass.simpleName,
                 )
+            }
+        }
+    }
+
+    suspend fun loadAppDetails(
+        appId: Int,
+        cacheDao: SteamSearchCacheDao,
+        forceRefresh: Boolean = false,
+    ): AppDetailsOutcome {
+        if (appId <= 0) return AppDetailsOutcome(error = "Invalid AppID")
+
+        val now = System.currentTimeMillis()
+        val cacheKey = "steam-store:appdetails:v1:${steamCountry()}:${steamLanguage()}:$appId"
+        val cachedEntry = cacheDao.get(cacheKey)
+        val cachedDetails = cachedEntry?.let {
+            runCatching { decodeAppDetails(it.payloadJson) }.getOrNull()
+        }
+
+        if (!forceRefresh && cachedEntry != null && cachedDetails != null &&
+            now - cachedEntry.updatedAt <= DETAILS_CACHE_FRESH_MS
+        ) {
+            cacheDao.touch(cacheKey, now)
+            return AppDetailsOutcome(details = cachedDetails, fromCache = true)
+        }
+
+        return try {
+            val url =
+                "https://store.steampowered.com/api/appdetails?appids=$appId" +
+                    "&cc=${encode(steamCountry())}&l=${encode(steamLanguage())}"
+            val body = execute(url)
+            val root = JSONObject(body)
+            val wrapper = root.optJSONObject(appId.toString())
+                ?: error("Steam Store returned no details for AppID $appId")
+            if (!wrapper.optBoolean("success", false)) {
+                error("Steam Store could not load AppID $appId")
+            }
+            val data = wrapper.optJSONObject("data")
+                ?: error("Steam Store returned empty details for AppID $appId")
+            val details = parseAppDetails(appId, data)
+
+            cacheDao.put(
+                SteamSearchCacheEntry(
+                    cacheKey = cacheKey,
+                    payloadJson = encodeAppDetails(details),
+                    updatedAt = now,
+                    lastAccessedAt = now,
+                ),
+            )
+            maintainCache(cacheDao, now)
+            AppDetailsOutcome(details = details)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "Steam Store appdetails failed for $appId")
+            if (cachedEntry != null && cachedDetails != null &&
+                now - cachedEntry.updatedAt <= DETAILS_CACHE_STALE_MS
+            ) {
+                cacheDao.touch(cacheKey, now)
+                AppDetailsOutcome(
+                    details = cachedDetails,
+                    fromCache = true,
+                    staleCache = true,
+                    error = e.message ?: e.javaClass.simpleName,
+                )
+            } else {
+                AppDetailsOutcome(error = e.message ?: e.javaClass.simpleName)
             }
         }
     }
@@ -400,6 +475,285 @@ object SteamCatalogRepository {
             fetchedAt = root.optLong("fetched_at"),
         )
     }
+
+    private fun parseAppDetails(appId: Int, data: JSONObject): SteamStoreAppDetails {
+        fun stringList(key: String): List<String> {
+            val array = data.optJSONArray(key) ?: return emptyList()
+            return buildList {
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index).trim()
+                    if (value.isNotBlank()) add(value)
+                }
+            }
+        }
+
+        fun namedValues(key: String): List<SteamStoreNamedValue> {
+            val array = data.optJSONArray(key) ?: return emptyList()
+            return buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val description = item.optString("description").trim()
+                    if (description.isNotBlank()) {
+                        add(SteamStoreNamedValue(item.optInt("id"), description))
+                    }
+                }
+            }
+        }
+
+        fun requirements(key: String): Pair<String, String> {
+            val obj = data.optJSONObject(key) ?: return "" to ""
+            return stripHtml(obj.optString("minimum")) to stripHtml(obj.optString("recommended"))
+        }
+
+        val priceObj = data.optJSONObject("price_overview")
+        val price = priceObj?.let {
+            SteamStorePriceOverview(
+                currency = it.optString("currency"),
+                initialFormatted = it.optString("initial_formatted"),
+                finalFormatted = it.optString("final_formatted"),
+                discountPercent = it.optInt("discount_percent"),
+            )
+        }
+
+        val platformsObj = data.optJSONObject("platforms")
+        val platforms = SteamStorePlatformSupport(
+            windows = platformsObj?.optBoolean("windows") == true,
+            mac = platformsObj?.optBoolean("mac") == true,
+            linux = platformsObj?.optBoolean("linux") == true,
+        )
+
+        val metacriticObj = data.optJSONObject("metacritic")
+        val recommendationsObj = data.optJSONObject("recommendations")
+        val achievementsObj = data.optJSONObject("achievements")
+        val releaseDateObj = data.optJSONObject("release_date")
+        val supportInfoObj = data.optJSONObject("support_info")
+        val (pcMin, pcRec) = requirements("pc_requirements")
+        val (macMin, macRec) = requirements("mac_requirements")
+        val (linuxMin, linuxRec) = requirements("linux_requirements")
+
+        val screenshots = buildList {
+            val array = data.optJSONArray("screenshots") ?: JSONArray()
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                add(
+                    SteamStoreScreenshot(
+                        id = item.optInt("id"),
+                        thumbnailUrl = item.optString("path_thumbnail"),
+                        fullUrl = item.optString("path_full"),
+                    ),
+                )
+            }
+        }
+
+        return SteamStoreAppDetails(
+            appId = appId,
+            type = data.optString("type"),
+            name = data.optString("name"),
+            requiredAge = data.optString("required_age"),
+            isFree = data.optBoolean("is_free"),
+            shortDescription = stripHtml(data.optString("short_description")),
+            detailedDescription = stripHtml(data.optString("detailed_description")),
+            aboutTheGame = stripHtml(data.optString("about_the_game")),
+            supportedLanguages = stripHtml(data.optString("supported_languages")),
+            headerImage = data.optString("header_image"),
+            capsuleImage = data.optString("capsule_image"),
+            capsuleImageV5 = data.optString("capsule_imagev5"),
+            website = data.optString("website"),
+            developers = stringList("developers"),
+            publishers = stringList("publishers"),
+            price = price,
+            platforms = platforms,
+            metacriticScore = metacriticObj?.optInt("score")?.takeIf { it > 0 },
+            metacriticUrl = metacriticObj?.optString("url").orEmpty(),
+            categories = namedValues("categories"),
+            genres = namedValues("genres"),
+            recommendationsTotal = recommendationsObj?.optInt("total")?.takeIf { it > 0 },
+            achievementsTotal = achievementsObj?.optInt("total")?.takeIf { it > 0 },
+            releaseDate = releaseDateObj?.optString("date").orEmpty(),
+            comingSoon = releaseDateObj?.optBoolean("coming_soon") == true,
+            supportUrl = supportInfoObj?.optString("url").orEmpty(),
+            supportEmail = supportInfoObj?.optString("email").orEmpty(),
+            pcRequirementsMinimum = pcMin,
+            pcRequirementsRecommended = pcRec,
+            macRequirementsMinimum = macMin,
+            macRequirementsRecommended = macRec,
+            linuxRequirementsMinimum = linuxMin,
+            linuxRequirementsRecommended = linuxRec,
+            screenshots = screenshots,
+        )
+    }
+
+    private fun encodeAppDetails(details: SteamStoreAppDetails): String = JSONObject()
+        .put("app_id", details.appId)
+        .put("type", details.type)
+        .put("name", details.name)
+        .put("required_age", details.requiredAge)
+        .put("is_free", details.isFree)
+        .put("short_description", details.shortDescription)
+        .put("detailed_description", details.detailedDescription)
+        .put("about_the_game", details.aboutTheGame)
+        .put("supported_languages", details.supportedLanguages)
+        .put("header_image", details.headerImage)
+        .put("capsule_image", details.capsuleImage)
+        .put("capsule_imagev5", details.capsuleImageV5)
+        .put("website", details.website)
+        .put("developers", JSONArray(details.developers))
+        .put("publishers", JSONArray(details.publishers))
+        .put(
+            "price",
+            details.price?.let {
+                JSONObject()
+                    .put("currency", it.currency)
+                    .put("initial_formatted", it.initialFormatted)
+                    .put("final_formatted", it.finalFormatted)
+                    .put("discount_percent", it.discountPercent)
+            } ?: JSONObject.NULL,
+        )
+        .put(
+            "platforms",
+            JSONObject()
+                .put("windows", details.platforms.windows)
+                .put("mac", details.platforms.mac)
+                .put("linux", details.platforms.linux),
+        )
+        .put("metacritic_score", details.metacriticScore ?: JSONObject.NULL)
+        .put("metacritic_url", details.metacriticUrl)
+        .put("categories", encodeNamedValues(details.categories))
+        .put("genres", encodeNamedValues(details.genres))
+        .put("recommendations_total", details.recommendationsTotal ?: JSONObject.NULL)
+        .put("achievements_total", details.achievementsTotal ?: JSONObject.NULL)
+        .put("release_date", details.releaseDate)
+        .put("coming_soon", details.comingSoon)
+        .put("support_url", details.supportUrl)
+        .put("support_email", details.supportEmail)
+        .put("pc_min", details.pcRequirementsMinimum)
+        .put("pc_rec", details.pcRequirementsRecommended)
+        .put("mac_min", details.macRequirementsMinimum)
+        .put("mac_rec", details.macRequirementsRecommended)
+        .put("linux_min", details.linuxRequirementsMinimum)
+        .put("linux_rec", details.linuxRequirementsRecommended)
+        .put(
+            "screenshots",
+            JSONArray().apply {
+                details.screenshots.forEach { shot ->
+                    put(
+                        JSONObject()
+                            .put("id", shot.id)
+                            .put("thumbnail", shot.thumbnailUrl)
+                            .put("full", shot.fullUrl),
+                    )
+                }
+            },
+        )
+        .toString()
+
+    private fun decodeAppDetails(payload: String): SteamStoreAppDetails {
+        val root = JSONObject(payload)
+        val priceObj = root.optJSONObject("price")
+        val platformsObj = root.optJSONObject("platforms")
+        val screenshotsJson = root.optJSONArray("screenshots") ?: JSONArray()
+        val screenshots = buildList {
+            for (index in 0 until screenshotsJson.length()) {
+                val shot = screenshotsJson.optJSONObject(index) ?: continue
+                add(
+                    SteamStoreScreenshot(
+                        id = shot.optInt("id"),
+                        thumbnailUrl = shot.optString("thumbnail"),
+                        fullUrl = shot.optString("full"),
+                    ),
+                )
+            }
+        }
+
+        return SteamStoreAppDetails(
+            appId = root.optInt("app_id"),
+            type = root.optString("type"),
+            name = root.optString("name"),
+            requiredAge = root.optString("required_age"),
+            isFree = root.optBoolean("is_free"),
+            shortDescription = root.optString("short_description"),
+            detailedDescription = root.optString("detailed_description"),
+            aboutTheGame = root.optString("about_the_game"),
+            supportedLanguages = root.optString("supported_languages"),
+            headerImage = root.optString("header_image"),
+            capsuleImage = root.optString("capsule_image"),
+            capsuleImageV5 = root.optString("capsule_imagev5"),
+            website = root.optString("website"),
+            developers = decodeStringArray(root.optJSONArray("developers")),
+            publishers = decodeStringArray(root.optJSONArray("publishers")),
+            price = priceObj?.let {
+                SteamStorePriceOverview(
+                    currency = it.optString("currency"),
+                    initialFormatted = it.optString("initial_formatted"),
+                    finalFormatted = it.optString("final_formatted"),
+                    discountPercent = it.optInt("discount_percent"),
+                )
+            },
+            platforms = SteamStorePlatformSupport(
+                windows = platformsObj?.optBoolean("windows") == true,
+                mac = platformsObj?.optBoolean("mac") == true,
+                linux = platformsObj?.optBoolean("linux") == true,
+            ),
+            metacriticScore = if (root.isNull("metacritic_score")) null else root.optInt("metacritic_score"),
+            metacriticUrl = root.optString("metacritic_url"),
+            categories = decodeNamedValues(root.optJSONArray("categories")),
+            genres = decodeNamedValues(root.optJSONArray("genres")),
+            recommendationsTotal = if (root.isNull("recommendations_total")) null else root.optInt("recommendations_total"),
+            achievementsTotal = if (root.isNull("achievements_total")) null else root.optInt("achievements_total"),
+            releaseDate = root.optString("release_date"),
+            comingSoon = root.optBoolean("coming_soon"),
+            supportUrl = root.optString("support_url"),
+            supportEmail = root.optString("support_email"),
+            pcRequirementsMinimum = root.optString("pc_min"),
+            pcRequirementsRecommended = root.optString("pc_rec"),
+            macRequirementsMinimum = root.optString("mac_min"),
+            macRequirementsRecommended = root.optString("mac_rec"),
+            linuxRequirementsMinimum = root.optString("linux_min"),
+            linuxRequirementsRecommended = root.optString("linux_rec"),
+            screenshots = screenshots,
+        )
+    }
+
+    private fun encodeNamedValues(values: List<SteamStoreNamedValue>): JSONArray = JSONArray().apply {
+        values.forEach { value ->
+            put(JSONObject().put("id", value.id).put("description", value.description))
+        }
+    }
+
+    private fun decodeNamedValues(array: JSONArray?): List<SteamStoreNamedValue> {
+        if (array == null) return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val description = item.optString("description")
+                if (description.isNotBlank()) add(SteamStoreNamedValue(item.optInt("id"), description))
+            }
+        }
+    }
+
+    private fun decodeStringArray(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val value = array.optString(index).trim()
+                if (value.isNotBlank()) add(value)
+            }
+        }
+    }
+
+    private fun stripHtml(value: String): String = value
+        .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
+        .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "• ")
+        .replace(Regex("</li>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("<[^>]+>"), " ")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace(Regex("[ \\t]+"), " ")
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
 
     private fun steamLanguage(): String = when (Locale.getDefault().language.lowercase()) {
         "pt" -> if (Locale.getDefault().country.equals("BR", ignoreCase = true)) "brazilian" else "portuguese"
