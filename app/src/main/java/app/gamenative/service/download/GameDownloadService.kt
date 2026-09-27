@@ -77,12 +77,11 @@ object GameDownloadService {
      * [installDir], reporting progress into [downloadInfo] exactly like the old
      * `DepotDownloader` listener did (per-depot delta bytes + per-depot fraction).
      *
-     * Depots Steam refuses to serve (no manifest gid for the branch, depot key denied —
-     * e.g. a DLC the account doesn't own) are skipped, not fatal.
+     * Depots that cannot be resolved to a manifest/key are omitted from the native plan.
      *
-     * Returns the ids of the depots that were actually downloaded, so the caller only
-     * marks those complete (a skipped depot must NOT be recorded as downloaded — it
-     * would be filtered out as "already downloaded" forever after).
+     * Returns the ids of depots that were admitted to the native plan and finished successfully
+     * (including depots the native journal already considered installed). The caller must compare
+     * this set with its selected depots before marking the app complete.
      * Throws [DownloadFailedException] when not a single depot was servable, and
      * [kotlinx.coroutines.CancellationException] when the calling job is cancelled.
      */
@@ -98,7 +97,7 @@ object GameDownloadService {
         maxWorkers: Int,
         processWorkers: Int,
         parentScope: CoroutineScope,
-    ) {
+    ): Set<Int> {
         val steamClient = SteamService.instance?.steamClient
             ?: throw DownloadFailedException("Steam client not available")
         val steamApps = steamClient.getHandler(SteamApps::class.java)
@@ -287,6 +286,8 @@ object GameDownloadService {
                 resolved.depotKey,
             )
         }
+
+        return resolvedDepotIds.toSet()
     }
 
     private suspend fun runNativeSteamDownload(
