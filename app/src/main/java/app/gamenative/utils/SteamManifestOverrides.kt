@@ -1,9 +1,11 @@
 package app.gamenative.utils
 
 import android.content.Context
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -84,6 +86,8 @@ object SteamManifestOverrideStore {
     private const val METADATA_MAGIC = 0x1F4812BEL
     private const val EOF_MAGIC = 0x32C415ABL
     private const val MAX_REMOTE_BYTES = 64L * 1024L * 1024L
+    private const val MAX_PACKAGE_UNCOMPRESSED_BYTES = 128L * 1024L * 1024L
+    private const val MAX_PACKAGE_ENTRIES = 512
 
     private val manifestNameRegex = Regex("""^(\d+)_(\d+)\.manifest$""", RegexOption.IGNORE_CASE)
     private val manifestMetadataCache =
@@ -146,7 +150,7 @@ object SteamManifestOverrideStore {
         }
 
         val request = Request.Builder().url(trimmed).get().build()
-        SteamUtils.http.newCall(request).execute().use { response ->
+        Net.http.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "HTTP ${response.code}" }
             check(response.request.url.isHttps) { "Manifest source redirected away from HTTPS" }
 
@@ -177,14 +181,111 @@ object SteamManifestOverrideStore {
                 ?.takeIf { it.isNotBlank() }
                 ?: "manifest.lua"
 
-            if (isRawSteamManifest(bytes)) {
-                saveManifest(context, appId, fileName, bytes)
-                1
-            } else {
-                saveLua(context, appId, bytes.toString(Charsets.UTF_8))
-            }
+            importArtifact(context, appId, fileName, bytes)
         }
     }
+
+    /**
+     * Import the same artifact shapes LuaTools providers return: bare Lua, raw .manifest, or ZIP.
+     *
+     * ZIP entries are never extracted to arbitrary paths. Only Lua files for this AppID and raw
+     * Steam manifests are consumed, with bounded entry count/uncompressed bytes.
+     */
+    fun importArtifact(
+        context: Context,
+        appId: Int,
+        fileName: String,
+        bytes: ByteArray,
+    ): Int {
+        require(appId > 0) { "Invalid Steam app id" }
+        return when {
+            isZip(bytes) -> importZip(context, appId, bytes)
+            isRawSteamManifest(bytes) -> {
+                saveManifest(context, appId, fileName, bytes)
+                1
+            }
+            else -> saveLua(context, appId, bytes.toString(Charsets.UTF_8))
+        }
+    }
+
+    private fun importZip(
+        context: Context,
+        appId: Int,
+        bytes: ByteArray,
+    ): Int {
+        var imported = 0
+        var entries = 0
+        var uncompressed = 0L
+        var selectedLua: Pair<String, ByteArray>? = null
+
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                entries++
+                require(entries <= MAX_PACKAGE_ENTRIES) { "Manifest package has too many entries" }
+
+                if (entry.isDirectory) {
+                    zip.closeEntry()
+                    continue
+                }
+
+                val name = entry.name.substringAfterLast('/').substringAfterLast('\\')
+                val isLua = name.endsWith(".lua", ignoreCase = true)
+                val isManifest = name.endsWith(".manifest", ignoreCase = true)
+                if (!isLua && !isManifest) {
+                    zip.closeEntry()
+                    continue
+                }
+
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                while (true) {
+                    val read = zip.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    uncompressed += read
+                    require(uncompressed <= MAX_PACKAGE_UNCOMPRESSED_BYTES) {
+                        "Manifest package is too large"
+                    }
+                    output.write(buffer, 0, read)
+                }
+                val entryBytes = output.toByteArray()
+
+                if (isManifest) {
+                    saveManifest(context, appId, name, entryBytes)
+                    imported++
+                } else if (luaEntryMatchesApp(name, appId)) {
+                    // Prefer exact <appid>.lua over build-suffixed variants if both exist.
+                    val exact = name.equals("$appId.lua", ignoreCase = true)
+                    val currentExact = selectedLua?.first?.equals("$appId.lua", ignoreCase = true) == true
+                    if (selectedLua == null || exact || !currentExact) {
+                        selectedLua = name to entryBytes
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+
+        selectedLua?.let { (_, luaBytes) ->
+            imported += saveLua(context, appId, luaBytes.toString(Charsets.UTF_8))
+        }
+
+        require(imported > 0) { "ZIP contains no usable Lua or Steam manifest files" }
+        return imported
+    }
+
+    private fun luaEntryMatchesApp(fileName: String, appId: Int): Boolean {
+        val stem = fileName.substringBeforeLast('.', fileName)
+        val leading = Regex("""^\s*(\d+)""").find(stem)?.groupValues?.getOrNull(1)
+        return leading?.toIntOrNull() == appId
+    }
+
+    fun isZip(bytes: ByteArray): Boolean =
+        bytes.size >= 4 &&
+            bytes[0] == 0x50.toByte() &&
+            bytes[1] == 0x4B.toByte() &&
+            bytes[2] == 0x03.toByte() &&
+            bytes[3] == 0x04.toByte()
 
     fun saveManifest(
         context: Context,
