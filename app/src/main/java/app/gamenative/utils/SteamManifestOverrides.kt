@@ -2,6 +2,7 @@ package app.gamenative.utils
 
 import android.content.Context
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import timber.log.Timber
 
 /**
@@ -75,8 +76,13 @@ object LuaManifestOverrideParser {
 object SteamManifestOverrideStore {
     private const val DIRECTORY = "steam-manifest-overrides"
     private const val MANIFESTS_DIRECTORY = "manifests"
+    private const val PAYLOAD_MAGIC = 0x71F617D0L
+    private const val METADATA_MAGIC = 0x1F4812BEL
+    private const val EOF_MAGIC = 0x32C415ABL
 
     private val manifestNameRegex = Regex("""^(\d+)_(\d+)\.manifest$""", RegexOption.IGNORE_CASE)
+    private val manifestMetadataCache =
+        ConcurrentHashMap<String, Pair<Long, SteamManifestOverride>>()
 
     private fun root(context: Context): File = File(context.filesDir, DIRECTORY)
 
@@ -124,18 +130,29 @@ object SteamManifestOverrideStore {
         bytes: ByteArray,
     ): SteamManifestOverride {
         require(appId > 0) { "Invalid Steam app id" }
-        val override = parseManifestFileName(fileName)
+        val fileOverride = parseManifestFileName(fileName)
             ?: throw IllegalArgumentException(
                 "Manifest filename must be <depotId>_<manifestGid>.manifest",
             )
         require(isRawSteamManifest(bytes)) { "Selected file is not a raw Steam depot manifest" }
+        val metadata = parseRawSteamManifestMetadata(bytes)
+            ?: throw IllegalArgumentException("Could not parse Steam manifest metadata")
+        require(metadata.depotId == fileOverride.depotId) {
+            "Manifest depot ID does not match its filename"
+        }
+        require(metadata.manifestId == fileOverride.manifestId) {
+            "Manifest GID does not match its filename"
+        }
+        val override = fileOverride.copy(sizeOnDisk = metadata.sizeOnDisk)
 
         val dir = manifestRoot(context, appId)
         check(dir.exists() || dir.mkdirs()) { "Could not create manifest override directory" }
 
         val normalizedName =
             "${override.depotId}_${java.lang.Long.toUnsignedString(override.manifestId)}.manifest"
-        writeAtomically(File(dir, normalizedName), bytes)
+        val destination = File(dir, normalizedName)
+        writeAtomically(destination, bytes)
+        manifestMetadataCache[destination.absolutePath] = destination.lastModified() to override
 
         Timber.i(
             "Imported local manifest override depot=%d gid=%s for Steam app %d",
@@ -165,10 +182,10 @@ object SteamManifestOverrideStore {
         // A directly imported .manifest is the most explicit source, so it wins over a Lua pin
         // for the same depot.
         manifestRoot(context, appId).listFiles()
-            ?.filter { it.isFile }
+            ?.filter { it.isFile && it.name.endsWith(".manifest", ignoreCase = true) }
             ?.sortedBy { it.lastModified() }
             ?.forEach { file ->
-                parseManifestFileName(file.name)?.let { override ->
+                overrideFromManifestFile(file)?.let { override ->
                     overrides[override.depotId] = override
                 }
             }
@@ -223,6 +240,8 @@ object SteamManifestOverrideStore {
         if (luaFile.exists() && !luaFile.delete()) success = false
 
         val manifests = manifestRoot(context, appId)
+        val manifestPrefix = manifests.absolutePath + File.separator
+        manifestMetadataCache.keys.removeIf { it.startsWith(manifestPrefix) }
         if (manifests.exists() && !manifests.deleteRecursively()) success = false
 
         return success
@@ -239,11 +258,118 @@ object SteamManifestOverrideStore {
     }
 
     fun isRawSteamManifest(bytes: ByteArray): Boolean =
-        bytes.size >= 4 &&
-            bytes[0] == 0xD0.toByte() &&
-            bytes[1] == 0x17.toByte() &&
-            bytes[2] == 0xF6.toByte() &&
-            bytes[3] == 0x71.toByte()
+        bytes.size >= 4 && readU32Le(bytes, 0) == PAYLOAD_MAGIC
+
+    /**
+     * Minimal reader for Steam's raw depot-manifest metadata section.
+     *
+     * It reads only depot id, manifest GID and uncompressed size. This lets the normal
+     * DownloadInfo weighting/ETA use the alternate version's actual size without executing Lua.
+     */
+    fun parseRawSteamManifestMetadata(bytes: ByteArray): SteamManifestOverride? {
+        var offset = 0
+        while (offset + 8 <= bytes.size) {
+            val magic = readU32Le(bytes, offset) ?: return null
+            val length = readU32Le(bytes, offset + 4)?.toInt() ?: return null
+            offset += 8
+
+            if (magic == EOF_MAGIC) return null
+            if (length < 0 || offset + length > bytes.size) return null
+
+            if (magic == METADATA_MAGIC) {
+                return parseMetadata(bytes, offset, offset + length)
+            }
+            offset += length
+        }
+        return null
+    }
+
+    private fun overrideFromManifestFile(file: File): SteamManifestOverride? {
+        val named = parseManifestFileName(file.name) ?: return null
+        val cached = manifestMetadataCache[file.absolutePath]
+        if (cached != null && cached.first == file.lastModified()) return cached.second
+
+        val parsed = runCatching {
+            parseRawSteamManifestMetadata(file.readBytes())
+        }.getOrNull() ?: return null
+        if (parsed.depotId != named.depotId || parsed.manifestId != named.manifestId) return null
+
+        manifestMetadataCache[file.absolutePath] = file.lastModified() to parsed
+        return parsed
+    }
+
+    private fun parseMetadata(
+        bytes: ByteArray,
+        start: Int,
+        end: Int,
+    ): SteamManifestOverride? {
+        var offset = start
+        var depotId = 0
+        var manifestId = 0L
+        var sizeOnDisk = 0L
+
+        while (offset < end) {
+            val tag = readVarint(bytes, offset, end) ?: return null
+            offset = tag.next
+            val field = (tag.value shr 3).toInt()
+            val wire = (tag.value and 7uL).toInt()
+
+            if (wire == 0) {
+                val value = readVarint(bytes, offset, end) ?: return null
+                offset = value.next
+                when (field) {
+                    1 -> depotId = value.value.toLong().toInt()
+                    2 -> manifestId = value.value.toLong()
+                    5 -> sizeOnDisk = value.value.toLong()
+                }
+                continue
+            }
+
+            offset = skipField(bytes, offset, end, wire) ?: return null
+        }
+
+        if (depotId <= 0 || manifestId == 0L || sizeOnDisk < 0L) return null
+        return SteamManifestOverride(
+            depotId = depotId,
+            manifestId = manifestId,
+            sizeOnDisk = sizeOnDisk.takeIf { it > 0L },
+        )
+    }
+
+    private data class VarintResult(val value: ULong, val next: Int)
+
+    private fun readVarint(bytes: ByteArray, start: Int, end: Int): VarintResult? {
+        var offset = start
+        var shift = 0
+        var value = 0uL
+        while (offset < end && shift < 70) {
+            val b = bytes[offset].toInt() and 0xff
+            offset++
+            value = value or (((b and 0x7f).toULong()) shl shift)
+            if ((b and 0x80) == 0) return VarintResult(value, offset)
+            shift += 7
+        }
+        return null
+    }
+
+    private fun skipField(bytes: ByteArray, start: Int, end: Int, wire: Int): Int? = when (wire) {
+        1 -> (start + 8).takeIf { it <= end }
+        2 -> {
+            val length = readVarint(bytes, start, end) ?: return null
+            val next = length.next + length.value.toLong()
+            next.takeIf { it <= end.toLong() }?.toInt()
+        }
+        5 -> (start + 4).takeIf { it <= end }
+        else -> null
+    }
+
+    private fun readU32Le(bytes: ByteArray, offset: Int): Long? {
+        if (offset < 0 || offset + 4 > bytes.size) return null
+        return (bytes[offset].toLong() and 0xffL) or
+            ((bytes[offset + 1].toLong() and 0xffL) shl 8) or
+            ((bytes[offset + 2].toLong() and 0xffL) shl 16) or
+            ((bytes[offset + 3].toLong() and 0xffL) shl 24)
+    }
 
     private fun localManifestFile(
         context: Context,
