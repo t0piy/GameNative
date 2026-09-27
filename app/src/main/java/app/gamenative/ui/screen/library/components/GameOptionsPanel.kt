@@ -366,6 +366,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ManageMods -> Icons.Default.Extension
         AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
         AppOptionMenuType.ImportManifestOverrides -> Icons.Default.FileDownload
+        AppOptionMenuType.ImportManifestUrl -> Icons.Default.CloudDownload
         AppOptionMenuType.ClearManifestOverrides -> Icons.Default.Delete
         AppOptionMenuType.ChangePreferredCopy -> Icons.Filled.Face4
         AppOptionMenuType.AddToFavorites -> Icons.Filled.StarOutline
@@ -402,6 +403,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.ChangeBranch,
             AppOptionMenuType.ChangePreferredCopy,
             AppOptionMenuType.ImportManifestOverrides,
+            AppOptionMenuType.ImportManifestUrl,
             AppOptionMenuType.ClearManifestOverrides,
             -> gameManagement.add(option)
 
