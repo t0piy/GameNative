@@ -336,6 +336,7 @@ private fun LibraryScreenContent(
     val isViewWide = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var currentPaneType by remember { mutableStateOf(PrefManager.libraryLayout) }
     var recDisclosureShown by remember { mutableStateOf(PrefManager.recDisclosureShown) }
+    var showExplorerDisclosure by remember { mutableStateOf(false) }
     var showRecTeaserDialog by remember { mutableStateOf(false) }
     val onRecTeaserTapped = {
         if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "rec_teaser_tapped")
@@ -999,29 +1000,31 @@ private fun LibraryScreenContent(
                 }
                 // When on Steam/GOG/Epic/Amazon tab and not logged in, or LOCAL tab with no custom games, show splash
                 if (state.currentTab == LibraryTab.RECOMMENDED) {
-                    if (recDisclosureShown) {
-                        RecommendedTabPane(
-                            currentPaneType = currentPaneType,
-                            onNavigate = { item ->
-                                selectedAppId = item.appId
-                                selectedLibraryItem = item
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                            firstCarouselItemFocusRequester = carouselFocusRequester,
-                            firstGridItemFocusRequester = gridFirstItemFocusRequester,
-                            focusTargetListIndex = if (currentPaneType == PaneType.CAROUSEL) currentCarouselFocusTargetIndex() else gridFocusTargetListIndex,
-                            onFocusedIndexChanged = { carouselFocusTargetListIndex = it },
-                            onItemCountChanged = { recommendationItemCount = it },
-                        )
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize())
+                    RecommendedTabPane(
+                        currentPaneType = currentPaneType,
+                        onNavigate = { item ->
+                            selectedAppId = item.appId
+                            selectedLibraryItem = item
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        gogEnabled = recDisclosureShown,
+                        steamAvailable = isSteamConnected && SteamService.isLoggedIn,
+                        onRequestGogConsent = { showExplorerDisclosure = true },
+                        firstCarouselItemFocusRequester = carouselFocusRequester,
+                        firstGridItemFocusRequester = gridFirstItemFocusRequester,
+                        focusTargetListIndex = if (currentPaneType == PaneType.CAROUSEL) currentCarouselFocusTargetIndex() else gridFocusTargetListIndex,
+                        onFocusedIndexChanged = { carouselFocusTargetListIndex = it },
+                        onItemCountChanged = { recommendationItemCount = it },
+                    )
+                    if (showExplorerDisclosure && !recDisclosureShown) {
                         RecommendationDisclosureDialog(
                             onContinue = {
                                 PrefManager.recDisclosureShown = true
                                 recDisclosureShown = true
+                                showExplorerDisclosure = false
                                 PluviaApp.events.emit(AndroidEvent.RecommendationToggleChanged)
                             },
-                            onDismiss = { onTabChanged(LibraryTab.ALL) },
+                            onDismiss = { showExplorerDisclosure = false },
                         )
                     }
                 } else {
