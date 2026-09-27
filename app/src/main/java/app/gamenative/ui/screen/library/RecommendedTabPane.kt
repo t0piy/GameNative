@@ -1,29 +1,43 @@
 package app.gamenative.ui.screen.library
 
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,8 +51,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.gamenative.PrefManager
@@ -47,9 +65,11 @@ import app.gamenative.data.FeaturedItem
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.RecommendationRepository
-import app.gamenative.data.SteamCatalogEntry
 import app.gamenative.data.gog.GogRecCard
 import app.gamenative.service.SteamService
+import app.gamenative.steam.SteamStoreFilterOption
+import app.gamenative.steam.SteamStoreItemKind
+import app.gamenative.steam.SteamStoreSort
 import app.gamenative.ui.data.LibraryState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.PaneType
@@ -104,22 +124,14 @@ fun RecommendedTabPane(
         }
     }
 
-    LaunchedEffect(source, steamAvailable, steamState.catalogSize) {
-        if (source == ExplorerSource.STEAM && steamAvailable && steamState.catalogSize == 0 &&
-            !steamState.syncState.isSyncing
-        ) {
-            steamViewModel.refresh()
-        }
-    }
-
     val items = remember(state.cards, featured) {
         val campaigns = featured.mapIndexed { index, item -> item.toLibraryItem(index) }
         campaigns + state.cards.mapIndexed { index, card -> card.toLibraryItem(campaigns.size + index) }
     }
 
-    LaunchedEffect(source, items.size, steamState.games.size) {
+    LaunchedEffect(source, items.size, steamState.results.size) {
         onItemCountChanged(
-            if (source == ExplorerSource.STEAM) steamState.games.size else items.size,
+            if (source == ExplorerSource.STEAM) steamState.results.size else items.size,
         )
     }
 
@@ -171,9 +183,8 @@ fun RecommendedTabPane(
             ExplorerSource.STEAM -> SteamExplorerPane(
                 state = steamState,
                 steamAvailable = steamAvailable,
-                onQueryChange = steamViewModel::onQueryChange,
-                onRefresh = { steamViewModel.refresh(forceFull = false) },
-                onOpen = { entry -> steamViewModel.open(entry, onNavigate) },
+                viewModel = steamViewModel,
+                onNavigate = onNavigate,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -299,11 +310,34 @@ private fun GogExplorerPane(
 private fun SteamExplorerPane(
     state: SteamExplorerViewModel.UiState,
     steamAvailable: Boolean,
-    onQueryChange: (String) -> Unit,
-    onRefresh: () -> Unit,
-    onOpen: (SteamCatalogEntry) -> Unit,
+    viewModel: SteamExplorerViewModel,
+    onNavigate: (LibraryItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    var showFilters by rememberSaveable { mutableStateOf(false) }
+
+    fun openStore(url: String) {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
+
+    if (showFilters) {
+        SteamExplorerFilterDialog(
+            state = state,
+            onDismiss = { showFilters = false },
+            onToggleOption = viewModel::toggleOption,
+            onCycleTag = viewModel::cycleTag,
+            onSetSort = viewModel::setSort,
+            onSetMaxPrice = viewModel::setMaxPrice,
+            onSetSpecialsOnly = viewModel::setSpecialsOnly,
+            onSetHideFreeToPlay = viewModel::setHideFreeToPlay,
+            onClearFilters = viewModel::clearFilters,
+            onClearCache = viewModel::clearCache,
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -316,91 +350,462 @@ private fun SteamExplorerPane(
         ) {
             OutlinedTextField(
                 value = state.query,
-                onValueChange = onQueryChange,
-                enabled = steamAvailable,
+                onValueChange = viewModel::onQueryChange,
                 singleLine = true,
                 label = { Text(stringResource(R.string.explorer_steam_search_hint)) },
                 modifier = Modifier.weight(1f),
             )
+            OutlinedButton(onClick = { showFilters = true }) {
+                Icon(
+                    imageVector = Icons.Default.FilterList,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(
+                    if (state.filters.activeCount > 0) {
+                        stringResource(R.string.explorer_steam_filters_count, state.filters.activeCount)
+                    } else {
+                        stringResource(R.string.explorer_steam_filters)
+                    },
+                )
+            }
             IconButton(
-                enabled = steamAvailable && !state.syncState.isSyncing,
-                onClick = onRefresh,
+                enabled = !state.searchLoading,
+                onClick = viewModel::refresh,
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
             }
         }
 
-        val statusText = when {
-            !steamAvailable -> stringResource(R.string.explorer_steam_login_required)
-            state.syncState.isSyncing && state.syncState.totalChanges > 0 ->
-                stringResource(
-                    R.string.explorer_steam_indexing_progress,
-                    state.syncState.processedChanges,
-                    state.syncState.totalChanges,
-                    state.syncState.indexedGames,
-                )
-            state.syncState.isSyncing -> stringResource(R.string.explorer_steam_indexing)
-            state.catalogSize == 0 -> stringResource(R.string.explorer_steam_empty)
-            else -> stringResource(R.string.explorer_steam_indexed_count, state.catalogSize)
-        }
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-
-        state.syncState.error?.let { error ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (state.searchLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            }
             Text(
-                text = error,
+                text = stringResource(R.string.explorer_steam_results_count, state.totalResults),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.searchFromCache) {
+                Text(
+                    text = if (state.staleCache) {
+                        stringResource(R.string.explorer_steam_cache_stale)
+                    } else {
+                        stringResource(R.string.explorer_steam_cache)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (!steamAvailable) {
+                Text(
+                    text = stringResource(R.string.explorer_steam_login_for_luatools),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        state.error?.let { error ->
+            Text(
+                text = stringResource(R.string.explorer_steam_search_error, error),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
             )
-        }
-
-        if (state.syncState.isSyncing && state.catalogSize == 0) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(state.games, key = { it.appId }) { game ->
+            items(state.results, key = { it.key }) { result ->
+                val appId = result.appId
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = state.openingAppId == null) { onOpen(game) },
+                        .clickable(enabled = state.openingAppId == null) {
+                            if (appId != null && steamAvailable) {
+                                viewModel.openApp(result, onNavigate)
+                            } else {
+                                openStore(result.storeUrl)
+                            }
+                        },
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = game.name,
+                                text = result.name,
                                 style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = stringResource(R.string.explorer_steam_appid, game.appId),
+                                text = buildString {
+                                    append(
+                                        when (result.kind) {
+                                            SteamStoreItemKind.APP -> "App"
+                                            SteamStoreItemKind.BUNDLE -> "Bundle"
+                                            SteamStoreItemKind.PACKAGE -> "Package"
+                                            SteamStoreItemKind.OTHER -> "Store"
+                                        },
+                                    )
+                                    result.itemId?.let { append(" · ").append(it) }
+                                    if (result.releaseDate.isNotBlank()) {
+                                        append(" · ").append(result.releaseDate)
+                                    }
+                                    if (result.priceText.isNotBlank()) {
+                                        append(" · ").append(result.priceText)
+                                    }
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (appId != null && SteamService.isAppInstalled(appId)) {
+                                Text(
+                                    text = stringResource(R.string.installed),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
-                        if (state.openingAppId == game.appId) {
-                            CircularProgressIndicator()
-                        } else if (SteamService.isAppInstalled(game.appId)) {
-                            Text(
-                                text = stringResource(R.string.installed),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
+
+                        if (state.openingAppId == appId && appId != null) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        } else if (appId == null || !steamAvailable) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = stringResource(R.string.explorer_steam_open_store),
                             )
                         }
                     }
                 }
             }
+
+            if (!state.searchLoading && state.results.isEmpty()) {
+                item("empty") {
+                    Text(
+                        text = stringResource(R.string.explorer_steam_no_results),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun SteamExplorerFilterDialog(
+    state: SteamExplorerViewModel.UiState,
+    onDismiss: () -> Unit,
+    onToggleOption: (SteamStoreFilterOption) -> Unit,
+    onCycleTag: (String) -> Unit,
+    onSetSort: (SteamStoreSort) -> Unit,
+    onSetMaxPrice: (String?) -> Unit,
+    onSetSpecialsOnly: (Boolean) -> Unit,
+    onSetHideFreeToPlay: (Boolean) -> Unit,
+    onClearFilters: () -> Unit,
+    onClearCache: () -> Unit,
+) {
+    var optionSearch by rememberSaveable { mutableStateOf("") }
+    var expandedGroups by rememberSaveable {
+        mutableStateOf(setOf("category1", "tags"))
+    }
+    var priceDraft by remember(state.filters.maxPrice) {
+        mutableStateOf(state.filters.maxPrice.orEmpty())
+    }
+
+    val visibleGroups = remember(state.filterCatalog.groups, optionSearch) {
+        val query = optionSearch.trim()
+        state.filterCatalog.groups.mapNotNull { group ->
+            val options = if (query.isBlank()) {
+                group.options
+            } else {
+                group.options.filter { it.label.contains(query, ignoreCase = true) }
+            }
+            group.takeIf { options.isNotEmpty() }?.copy(options = options)
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.90f),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.explorer_steam_filters_title),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.explorer_steam_filters_active,
+                                state.filters.activeCount,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row {
+                        TextButton(onClick = onClearFilters, enabled = state.filters.activeCount > 0) {
+                            Text(stringResource(R.string.explorer_steam_filters_clear))
+                        }
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    item("sort-title") {
+                        SteamFilterSectionTitle(stringResource(R.string.explorer_steam_sort))
+                    }
+                    items(SteamStoreSort.entries, key = { "sort:${it.name}" }) { sort ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSetSort(sort) }
+                                .padding(horizontal = 20.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = state.filters.sort == sort,
+                                onClick = { onSetSort(sort) },
+                            )
+                            Text(sort.displayName)
+                        }
+                    }
+
+                    item("price") {
+                        SteamFilterSectionTitle(stringResource(R.string.explorer_steam_price_discount))
+                        OutlinedTextField(
+                            value = priceDraft,
+                            onValueChange = { value ->
+                                priceDraft = value.filter { it.isDigit() || it == '.' || it == ',' }
+                                onSetMaxPrice(priceDraft.replace(',', '.'))
+                            },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.explorer_steam_max_price)) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 6.dp),
+                        )
+                        SteamBooleanFilterRow(
+                            label = stringResource(R.string.explorer_steam_specials_only),
+                            checked = state.filters.specialsOnly,
+                            onCheckedChange = onSetSpecialsOnly,
+                        )
+                        SteamBooleanFilterRow(
+                            label = stringResource(R.string.explorer_steam_hide_f2p),
+                            checked = state.filters.hideFreeToPlay,
+                            onCheckedChange = onSetHideFreeToPlay,
+                        )
+                    }
+
+                    item("option-search") {
+                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                        OutlinedTextField(
+                            value = optionSearch,
+                            onValueChange = { optionSearch = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.explorer_steam_filter_search)) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                        )
+                        if (state.filterCatalogLoading) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Text(stringResource(R.string.explorer_steam_loading_filters))
+                            }
+                        }
+                        state.filterError?.let {
+                            Text(
+                                text = stringResource(R.string.explorer_steam_filter_fallback),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+
+                    visibleGroups.forEach { group ->
+                        item(key = "group:${group.key}") {
+                            val expanded = optionSearch.isNotBlank() || group.key in expandedGroups
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        expandedGroups = if (expanded) {
+                                            expandedGroups - group.key
+                                        } else {
+                                            expandedGroups + group.key
+                                        }
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = group.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = group.options.size.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        val expanded = optionSearch.isNotBlank() || group.key in expandedGroups
+                        if (expanded) {
+                            items(
+                                items = group.options,
+                                key = { option -> "option:${option.param}:${option.value}" },
+                            ) { option ->
+                                if (option.param == "tags") {
+                                    val included = option.value in state.filters.selected["tags"].orEmpty()
+                                    val excluded = option.value in state.filters.excludedTagIds
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onCycleTag(option.value) }
+                                            .padding(horizontal = 24.dp, vertical = 9.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = option.label,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Text(
+                                            text = when {
+                                                included -> stringResource(R.string.explorer_steam_tag_include)
+                                                excluded -> stringResource(R.string.explorer_steam_tag_exclude)
+                                                else -> stringResource(R.string.explorer_steam_tag_off)
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = when {
+                                                included -> MaterialTheme.colorScheme.primary
+                                                excluded -> MaterialTheme.colorScheme.error
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    val checked = option.value in state.filters.selected[option.param].orEmpty()
+                                    SteamBooleanFilterRow(
+                                        label = option.label,
+                                        checked = checked,
+                                        onCheckedChange = { onToggleOption(option) },
+                                        horizontalPadding = 24.dp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item("cache") {
+                        HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
+                        SteamFilterSectionTitle(stringResource(R.string.explorer_steam_cache_title))
+                        Text(
+                            text = stringResource(R.string.explorer_steam_cache_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                        )
+                        TextButton(
+                            onClick = onClearCache,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                        ) {
+                            Text(stringResource(R.string.explorer_steam_cache_clear))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SteamFilterSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
+private fun SteamBooleanFilterRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 20.dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = horizontalPadding, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
