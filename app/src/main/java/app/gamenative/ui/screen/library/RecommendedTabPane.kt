@@ -1,69 +1,114 @@
 package app.gamenative.ui.screen.library
 
+import android.os.SystemClock
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.gamenative.PrefManager
-import app.gamenative.data.FeaturedItem
-import app.gamenative.data.RecommendationRepository
 import app.gamenative.R
+import app.gamenative.data.FeaturedItem
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
+import app.gamenative.data.RecommendationRepository
+import app.gamenative.data.SteamCatalogEntry
 import app.gamenative.data.gog.GogRecCard
+import app.gamenative.service.SteamService
 import app.gamenative.ui.data.LibraryState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.PaneType
 import app.gamenative.ui.model.GogRecommendationsViewModel
+import app.gamenative.ui.model.SteamExplorerViewModel
 import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
 import app.gamenative.utils.ConversionTracker
 import com.posthog.PostHog
-import android.os.SystemClock
-import kotlinx.coroutines.delay
 import java.util.EnumSet
+import kotlinx.coroutines.delay
 import timber.log.Timber
+
+private enum class ExplorerSource {
+    GOG,
+    STEAM,
+}
 
 @Composable
 fun RecommendedTabPane(
     currentPaneType: PaneType,
     onNavigate: (LibraryItem) -> Unit,
     modifier: Modifier = Modifier,
+    gogEnabled: Boolean = true,
+    steamAvailable: Boolean = SteamService.isLoggedIn,
+    onRequestGogConsent: () -> Unit = {},
     viewModel: GogRecommendationsViewModel = hiltViewModel(),
-    firstCarouselItemFocusRequester: androidx.compose.ui.focus.FocusRequester? = null,
-    firstGridItemFocusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    steamViewModel: SteamExplorerViewModel = hiltViewModel(),
+    firstCarouselItemFocusRequester: FocusRequester? = null,
+    firstGridItemFocusRequester: FocusRequester? = null,
     focusTargetListIndex: Int = 0,
     onFocusedIndexChanged: (Int) -> Unit = {},
     onItemCountChanged: (Int) -> Unit = {},
 ) {
+    var source by rememberSaveable(gogEnabled) {
+        mutableStateOf(if (gogEnabled) ExplorerSource.GOG else ExplorerSource.STEAM)
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val steamState by steamViewModel.state.collectAsStateWithLifecycle()
     val featured by RecommendationRepository.featuredList.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadIfNeeded()
-        PrefManager.recommendedTabSeenDay = System.currentTimeMillis() / (24L * 60 * 60 * 1000)
-        if (PrefManager.usageAnalyticsEnabled) {
-            PostHog.capture(
-                event = "recommendation_tab_opened",
-                properties = mapOf("\$set" to mapOf("recommendation_enabled" to true)),
-            )
+    LaunchedEffect(source, gogEnabled) {
+        if (source == ExplorerSource.GOG && gogEnabled) {
+            viewModel.loadIfNeeded()
+            PrefManager.recommendedTabSeenDay = System.currentTimeMillis() / (24L * 60 * 60 * 1000)
+            if (PrefManager.usageAnalyticsEnabled) {
+                PostHog.capture(
+                    event = "recommendation_tab_opened",
+                    properties = mapOf("\$set" to mapOf("recommendation_enabled" to true)),
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(source, steamAvailable, steamState.catalogSize) {
+        if (source == ExplorerSource.STEAM && steamAvailable && steamState.catalogSize == 0 &&
+            !steamState.syncState.isSyncing
+        ) {
+            steamViewModel.refresh()
         }
     }
 
@@ -72,16 +117,91 @@ fun RecommendedTabPane(
         campaigns + state.cards.mapIndexed { index, card -> card.toLibraryItem(campaigns.size + index) }
     }
 
-    LaunchedEffect(items.size) {
-        onItemCountChanged(items.size)
+    LaunchedEffect(source, items.size, steamState.games.size) {
+        onItemCountChanged(
+            if (source == ExplorerSource.STEAM) steamState.games.size else items.size,
+        )
     }
 
-    // Batched impression tracking: accumulate which cards actually scrolled into view and
-    // emit a single summary event when the tab leaves composition, rather than one event per card.
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 72.dp, start = 16.dp, end = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = source == ExplorerSource.GOG,
+                onClick = {
+                    if (gogEnabled) {
+                        source = ExplorerSource.GOG
+                    } else {
+                        onRequestGogConsent()
+                    }
+                },
+                label = { Text(stringResource(R.string.explorer_source_gog)) },
+            )
+            FilterChip(
+                selected = source == ExplorerSource.STEAM,
+                onClick = { source = ExplorerSource.STEAM },
+                label = { Text(stringResource(R.string.explorer_source_steam)) },
+            )
+        }
+
+        when (source) {
+            ExplorerSource.GOG -> GogExplorerPane(
+                stateLoading = state.loading,
+                items = items,
+                currentPaneType = currentPaneType,
+                onNavigate = onNavigate,
+                onRefresh = viewModel::refresh,
+                modifier = Modifier.weight(1f),
+                firstCarouselItemFocusRequester = firstCarouselItemFocusRequester,
+                firstGridItemFocusRequester = firstGridItemFocusRequester,
+                focusTargetListIndex = focusTargetListIndex,
+                onFocusedIndexChanged = onFocusedIndexChanged,
+                compatibilityMap = state.compatibilityMap,
+                deviceGameStats = state.deviceGameStats,
+                gpuGameStats = state.gpuGameStats,
+                cards = state.cards,
+                featured = featured,
+            )
+
+            ExplorerSource.STEAM -> SteamExplorerPane(
+                state = steamState,
+                steamAvailable = steamAvailable,
+                onQueryChange = steamViewModel::onQueryChange,
+                onRefresh = { steamViewModel.refresh(forceFull = false) },
+                onOpen = { entry -> steamViewModel.open(entry, onNavigate) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun GogExplorerPane(
+    stateLoading: Boolean,
+    items: List<LibraryItem>,
+    currentPaneType: PaneType,
+    onNavigate: (LibraryItem) -> Unit,
+    onRefresh: () -> Unit,
+    modifier: Modifier,
+    firstCarouselItemFocusRequester: FocusRequester?,
+    firstGridItemFocusRequester: FocusRequester?,
+    focusTargetListIndex: Int,
+    onFocusedIndexChanged: (Int) -> Unit,
+    compatibilityMap: Map<String, app.gamenative.data.GameCompatibilityStatus>,
+    deviceGameStats: Map<GameSource, Map<String, app.gamenative.utils.DeviceGameStatsService.DeviceGameStats>>,
+    gpuGameStats: Map<GameSource, Map<String, app.gamenative.utils.DeviceGameStatsService.DeviceGameStats>>,
+    cards: List<GogRecCard>,
+    featured: List<FeaturedItem>,
+) {
     val gridState = rememberLazyGridState()
     val listState = rememberLazyListState()
     val seenIndices = remember { mutableSetOf<Int>() }
-    val currentCards by rememberUpdatedState(state.cards)
+    val currentCards by rememberUpdatedState(cards)
 
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.map { it.index } }
@@ -107,7 +227,7 @@ fun RecommendedTabPane(
             }
         }
     }
-    // Per-card impressions: a card counts once it has been on screen for a full second.
+
     val currentItems by rememberUpdatedState(items)
     val currentFeatured by rememberUpdatedState(featured)
     val currentLayout by rememberUpdatedState(currentPaneType)
@@ -129,60 +249,156 @@ fun RecommendedTabPane(
         onDispose { impressions.tick(currentItems, currentFeatured, currentLayout) }
     }
 
-    val recState = remember(items, state.compatibilityMap, state.deviceGameStats, state.gpuGameStats) {
+    val recState = remember(items, compatibilityMap, deviceGameStats, gpuGameStats) {
         LibraryState(
             appInfoList = items,
             totalAppsInFilter = items.size,
             appInfoSortType = EnumSet.of(AppFilter.GAME),
-            compatibilityMap = state.compatibilityMap,
-            deviceGameStats = state.deviceGameStats,
-            gpuGameStats = state.gpuGameStats,
+            compatibilityMap = compatibilityMap,
+            deviceGameStats = deviceGameStats,
+            gpuGameStats = gpuGameStats,
         )
     }
 
     Box(modifier = modifier.fillMaxSize()) {
         when {
-            state.loading -> {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            }
+            stateLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            items.isEmpty() -> Text(
+                text = stringResource(R.string.gog_rec_empty),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+            )
+            currentPaneType == PaneType.CAROUSEL -> LibraryCarouselPane(
+                state = recState,
+                listState = listState,
+                onPageChange = {},
+                onNavigate = { appId -> items.find { it.appId == appId }?.let(onNavigate) },
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize(),
+                firstCarouselItemFocusRequester = firstCarouselItemFocusRequester,
+                focusTargetListIndex = focusTargetListIndex,
+                onFocusedIndexChanged = onFocusedIndexChanged,
+            )
+            else -> LibraryListPane(
+                state = recState,
+                listState = gridState,
+                currentLayout = currentPaneType,
+                onPageChange = {},
+                onNavigate = { appId -> items.find { it.appId == appId }?.let(onNavigate) },
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize(),
+                firstGridItemFocusRequester = firstGridItemFocusRequester,
+                focusTargetListIndex = focusTargetListIndex,
+            )
+        }
+    }
+}
 
-            items.isEmpty() -> {
-                Text(
-                    text = stringResource(R.string.gog_rec_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+@Composable
+private fun SteamExplorerPane(
+    state: SteamExplorerViewModel.UiState,
+    steamAvailable: Boolean,
+    onQueryChange: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onOpen: (SteamCatalogEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = onQueryChange,
+                enabled = steamAvailable,
+                singleLine = true,
+                label = { Text(stringResource(R.string.explorer_steam_search_hint)) },
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                enabled = steamAvailable && !state.syncState.isSyncing,
+                onClick = onRefresh,
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
+            }
+        }
+
+        val statusText = when {
+            !steamAvailable -> stringResource(R.string.explorer_steam_login_required)
+            state.syncState.isSyncing && state.syncState.totalChanges > 0 ->
+                stringResource(
+                    R.string.explorer_steam_indexing_progress,
+                    state.syncState.processedChanges,
+                    state.syncState.totalChanges,
+                    state.syncState.indexedGames,
+                )
+            state.syncState.isSyncing -> stringResource(R.string.explorer_steam_indexing)
+            state.catalogSize == 0 -> stringResource(R.string.explorer_steam_empty)
+            else -> stringResource(R.string.explorer_steam_indexed_count, state.catalogSize)
+        }
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+
+        state.syncState.error?.let { error ->
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+
+        if (state.syncState.isSyncing && state.catalogSize == 0) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(state.games, key = { it.appId }) { game ->
+                Card(
                     modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(horizontal = 32.dp),
-                )
-            }
-
-            currentPaneType == PaneType.CAROUSEL -> {
-                LibraryCarouselPane(
-                    state = recState,
-                    listState = listState,
-                    onPageChange = {},
-                    onNavigate = { appId -> items.find { it.appId == appId }?.let(onNavigate) },
-                    onRefresh = { viewModel.refresh() },
-                    modifier = Modifier.fillMaxSize(),
-                    firstCarouselItemFocusRequester = firstCarouselItemFocusRequester,
-                    focusTargetListIndex = focusTargetListIndex,
-                    onFocusedIndexChanged = onFocusedIndexChanged,
-                )
-            }
-
-            else -> {
-                LibraryListPane(
-                    state = recState,
-                    listState = gridState,
-                    currentLayout = currentPaneType,
-                    onPageChange = {},
-                    onNavigate = { appId -> items.find { it.appId == appId }?.let(onNavigate) },
-                    onRefresh = { viewModel.refresh() },
-                    modifier = Modifier.fillMaxSize(),
-                    firstGridItemFocusRequester = firstGridItemFocusRequester,
-                    focusTargetListIndex = focusTargetListIndex,
-                )
+                        .fillMaxWidth()
+                        .clickable(enabled = state.openingAppId == null) { onOpen(game) },
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = game.name,
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = stringResource(R.string.explorer_steam_appid, game.appId),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (state.openingAppId == game.appId) {
+                            CircularProgressIndicator()
+                        } else if (SteamService.isAppInstalled(game.appId)) {
+                            Text(
+                                text = stringResource(R.string.installed),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
