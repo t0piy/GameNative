@@ -144,7 +144,7 @@ fun ManifestProviderCredentialsDialog(
                     }
                 },
             ) {
-                Text(stringResource(R.string.save))
+                Text(stringResource(R.string.manifest_provider_credentials_save))
             }
         },
         dismissButton = {
