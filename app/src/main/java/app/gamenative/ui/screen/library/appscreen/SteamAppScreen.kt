@@ -62,6 +62,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.service.SteamService.Companion.getAppDirPath
 import app.gamenative.ui.component.dialog.MessageDialog
 import app.gamenative.ui.component.dialog.ManifestOverridesDialog
+import app.gamenative.ui.component.dialog.ManifestProviderCredentialsDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.state.MessageDialogState
 import app.gamenative.ui.data.Achievement
