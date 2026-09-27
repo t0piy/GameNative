@@ -880,12 +880,40 @@ class SteamAppScreen : BaseAppScreen() {
             }
         }
         var showManifestProvidersDialog by remember(gameId) { mutableStateOf(false) }
+        var showManifestProviderCredentialsDialog by remember(gameId) {
+            mutableStateOf(false)
+        }
         var manifestProviders by remember(gameId) {
             mutableStateOf<List<LuaToolsManifestSource>>(emptyList())
         }
         var checkingManifestProviders by remember(gameId) { mutableStateOf(false) }
         var manifestProviderError by remember(gameId) { mutableStateOf<String?>(null) }
         var downloadingManifestProvider by remember(gameId) { mutableStateOf<String?>(null) }
+
+        ManifestProviderCredentialsDialog(
+            visible = showManifestProviderCredentialsDialog,
+            onDismissRequest = {
+                showManifestProviderCredentialsDialog = false
+                showManifestProvidersDialog = true
+            },
+            onSaved = {
+                showManifestProviderCredentialsDialog = false
+                showManifestProvidersDialog = true
+                checkingManifestProviders = true
+                manifestProviderError = null
+                scope.launch {
+                    try {
+                        manifestProviders =
+                            LuaToolsManifestProviderClient.checkSources(context, gameId)
+                    } catch (e: Exception) {
+                        manifestProviderError =
+                            e.message ?: e.javaClass.simpleName
+                    } finally {
+                        checkingManifestProviders = false
+                    }
+                }
+            },
+        )
 
         if (showManifestProvidersDialog) {
             AlertDialog(
@@ -994,7 +1022,21 @@ class SteamAppScreen : BaseAppScreen() {
                         }
                     }
                 },
-                confirmButton = {},
+                confirmButton = {
+                    TextButton(
+                        enabled = downloadingManifestProvider == null,
+                        onClick = {
+                            showManifestProvidersDialog = false
+                            showManifestProviderCredentialsDialog = true
+                        },
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.manifest_provider_credentials_settings_title,
+                            ),
+                        )
+                    }
+                },
                 dismissButton = {
                     TextButton(
                         enabled = downloadingManifestProvider == null,
