@@ -890,6 +890,8 @@ class SteamAppScreen : BaseAppScreen() {
             overrides = activeManifestOverrides,
             onDismissRequest = { showManifestOverridesDialog = false },
         )
+        var showManifestFileTargetDialog by remember(gameId) { mutableStateOf(false) }
+
         val manifestOverridePicker = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocument(),
         ) { uri ->
@@ -912,7 +914,7 @@ class SteamAppScreen : BaseAppScreen() {
 
                             SteamManifestOverrideStore.importArtifact(
                                 context = context,
-                                appId = gameId,
+                                appId = selectedManifestTargetAppId,
                                 fileName = displayName,
                                 bytes = bytes,
                             )
@@ -922,7 +924,10 @@ class SteamAppScreen : BaseAppScreen() {
                             context.getString(R.string.manifest_overrides_imported, count),
                         )
                     } catch (e: Exception) {
-                        Timber.w(e, "Manifest override import failed for app $gameId")
+                        Timber.w(
+                            e,
+                            "Manifest override import failed for app $selectedManifestTargetAppId",
+                        )
                         SnackbarManager.show(
                             context.getString(
                                 R.string.manifest_overrides_import_failed,
@@ -933,6 +938,42 @@ class SteamAppScreen : BaseAppScreen() {
                 }
             }
         }
+        if (showManifestFileTargetDialog) {
+            AlertDialog(
+                onDismissRequest = { showManifestFileTargetDialog = false },
+                title = { Text(stringResource(R.string.option_import_manifest_overrides)) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(stringResource(R.string.manifest_target_label))
+                        manifestTargetAppIds.forEach { targetAppId ->
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    selectedManifestTargetAppId = targetAppId
+                                    showManifestFileTargetDialog = false
+                                    manifestOverridePicker.launch(arrayOf("*/*"))
+                                },
+                            ) {
+                                Text(manifestTargetLabel(targetAppId))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showManifestFileTargetDialog = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
         var showManifestProvidersDialog by remember(gameId) { mutableStateOf(false) }
         var showManifestProviderCredentialsDialog by remember(gameId) {
             mutableStateOf(false)
@@ -1172,6 +1213,7 @@ class SteamAppScreen : BaseAppScreen() {
         var showManifestUrlDialog by remember(gameId) { mutableStateOf(false) }
         var manifestUrl by remember(gameId) { mutableStateOf("") }
         var importingManifestUrl by remember(gameId) { mutableStateOf(false) }
+        var manifestUrlTargetExpanded by remember(gameId) { mutableStateOf(false) }
 
         if (showManifestUrlDialog) {
             AlertDialog(
@@ -1181,6 +1223,46 @@ class SteamAppScreen : BaseAppScreen() {
                 title = { Text(stringResource(R.string.manifest_url_title)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ExposedDropdownMenuBox(
+                            expanded = manifestUrlTargetExpanded,
+                            onExpandedChange = {
+                                if (!importingManifestUrl) {
+                                    manifestUrlTargetExpanded = it
+                                }
+                            },
+                        ) {
+                            NoExtractOutlinedTextField(
+                                value = manifestTargetLabel(selectedManifestTargetAppId),
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = !importingManifestUrl,
+                                singleLine = true,
+                                label = { Text(stringResource(R.string.manifest_target_label)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = manifestUrlTargetExpanded,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = manifestUrlTargetExpanded,
+                                onDismissRequest = { manifestUrlTargetExpanded = false },
+                            ) {
+                                manifestTargetAppIds.forEach { targetAppId ->
+                                    DropdownMenuItem(
+                                        text = { Text(manifestTargetLabel(targetAppId)) },
+                                        onClick = {
+                                            selectedManifestTargetAppId = targetAppId
+                                            manifestUrlTargetExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
                         NoExtractOutlinedTextField(
                             value = manifestUrl,
                             onValueChange = { manifestUrl = it },
@@ -1209,7 +1291,7 @@ class SteamAppScreen : BaseAppScreen() {
                                 try {
                                     val count = SteamManifestOverrideStore.importFromUrl(
                                         context = context,
-                                        appId = gameId,
+                                        appId = selectedManifestTargetAppId,
                                         url = manifestUrl,
                                     )
                                     hasManifestOverrides = true
@@ -1219,7 +1301,11 @@ class SteamAppScreen : BaseAppScreen() {
                                         context.getString(R.string.manifest_overrides_imported, count),
                                     )
                                 } catch (e: Exception) {
-                                    Timber.w(e, "Remote manifest import failed for app $gameId")
+                                    Timber.w(
+                                        e,
+                                        "Remote manifest import failed for app " +
+                                            "$selectedManifestTargetAppId",
+                                    )
                                     SnackbarManager.show(
                                         context.getString(
                                             R.string.manifest_overrides_import_failed,
@@ -1314,7 +1400,12 @@ class SteamAppScreen : BaseAppScreen() {
             options += AppMenuOption(
                 AppOptionMenuType.ImportManifestOverrides,
                 onClick = {
-                    manifestOverridePicker.launch(arrayOf("*/*"))
+                    if (manifestTargetAppIds.size > 1) {
+                        showManifestFileTargetDialog = true
+                    } else {
+                        selectedManifestTargetAppId = gameId
+                        manifestOverridePicker.launch(arrayOf("*/*"))
+                    }
                 },
             )
             options += AppMenuOption(
