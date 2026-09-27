@@ -2685,4 +2685,12 @@
     <string name="manifest_url_title">Import manifest source</string>
     <string name="manifest_url_label">HTTPS URL to a Lua or .manifest file</string>
     <string name="manifest_url_import">Import</string>
+    <string name="option_find_manifest_providers">Find manifest providers</string>
+    <string name="manifest_providers_title">Manifest providers</string>
+    <string name="manifest_providers_checking">Checking providers…</string>
+    <string name="manifest_providers_none">No provider is available for this AppID.</string>
+    <string name="manifest_provider_direct">Direct</string>
+    <string name="manifest_provider_proxy_auth">Requires lua.tools sign-in</string>
+    <string name="manifest_provider_hubcap_key">Requires a Hubcap key</string>
+    <string name="manifest_provider_downloading">Downloading from %1$s…</string>
 </resources>
