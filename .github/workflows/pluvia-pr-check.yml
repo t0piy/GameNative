@@ -1,3 +1,4 @@
+# Fork CI validation enabled; keep PR and manual validation paths aligned.
 name: Pull Request build check
 
 on:
