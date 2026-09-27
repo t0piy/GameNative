@@ -63,6 +63,7 @@ import app.gamenative.utils.LsfgVkManager
 import app.gamenative.utils.MarkerUtils
 import app.gamenative.utils.Net
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.asyncIsolated
 import app.gamenative.utils.CURRENT_UFS_PARSE_VERSION
 import app.gamenative.utils.generateSteamApp
@@ -2522,11 +2523,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // credits decompressed chunk bytes written, so the progress bar and ETA must be
                 // in the same unit (previously getDownloadBytes = compressed → the bar could
                 // clamp at 100% before the depot was actually done).
+                val manifestOverrides = instance?.applicationContext
+                    ?.let { SteamManifestOverrideStore.load(it, appId) }
+                    .orEmpty()
                 val sizes = selectedDepots.map { (_, depot) ->
                     val mInfo = depot.manifests[branch]
                         ?: depot.encryptedManifests[branch]
                         ?: return@map 1L
-                    mInfo.size.coerceAtLeast(1L)
+                    manifestOverrides[depot.depotId]?.sizeOnDisk
+                        ?.coerceAtLeast(1L)
+                        ?: mInfo.size.coerceAtLeast(1L)
                 }
                 sizes.forEachIndexed { i, bytes -> di.setWeight(i, bytes) }
 
