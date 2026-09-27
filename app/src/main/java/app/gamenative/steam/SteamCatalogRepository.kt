@@ -151,11 +151,13 @@ object SteamCatalogRepository {
                     }
 
                     processed += batch.size
+                    val indexedSoFar = runCatching { dao.count() }
+                        .getOrDefault(_syncState.value.indexedGames)
                     _syncState.update {
                         it.copy(
                             isSyncing = true,
                             processedChanges = processed,
-                            indexedGames = runCatching { dao.count() }.getOrDefault(it.indexedGames),
+                            indexedGames = indexedSoFar,
                             error = if (failed) "Some Steam catalog batches will be retried." else null,
                         )
                     }
