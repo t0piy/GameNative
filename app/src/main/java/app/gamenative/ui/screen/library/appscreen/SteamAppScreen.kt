@@ -885,6 +885,82 @@ class SteamAppScreen : BaseAppScreen() {
                 }
             }
         }
+        var showManifestUrlDialog by remember(gameId) { mutableStateOf(false) }
+        var manifestUrl by remember(gameId) { mutableStateOf("") }
+        var importingManifestUrl by remember(gameId) { mutableStateOf(false) }
+
+        if (showManifestUrlDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (!importingManifestUrl) showManifestUrlDialog = false
+                },
+                title = { Text(stringResource(R.string.manifest_url_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        NoExtractOutlinedTextField(
+                            value = manifestUrl,
+                            onValueChange = { manifestUrl = it },
+                            label = { Text(stringResource(R.string.manifest_url_label)) },
+                            singleLine = true,
+                            enabled = !importingManifestUrl,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (importingManifestUrl) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                Text(stringResource(R.string.manifest_url_import))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = manifestUrl.isNotBlank() && !importingManifestUrl,
+                        onClick = {
+                            importingManifestUrl = true
+                            scope.launch {
+                                try {
+                                    val count = SteamManifestOverrideStore.importFromUrl(
+                                        context = context,
+                                        appId = gameId,
+                                        url = manifestUrl,
+                                    )
+                                    hasManifestOverrides = true
+                                    showManifestUrlDialog = false
+                                    manifestUrl = ""
+                                    SnackbarManager.show(
+                                        context.getString(R.string.manifest_overrides_imported, count),
+                                    )
+                                } catch (e: Exception) {
+                                    Timber.w(e, "Remote manifest import failed for app $gameId")
+                                    SnackbarManager.show(
+                                        context.getString(
+                                            R.string.manifest_overrides_import_failed,
+                                            e.message ?: e.javaClass.simpleName,
+                                        ),
+                                    )
+                                } finally {
+                                    importingManifestUrl = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.manifest_url_import))
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !importingManifestUrl,
+                        onClick = { showManifestUrlDialog = false },
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
         val familyGroupId by SteamService.familyGroupIdFlow.collectAsState()
         val familyPreferredCopyDataVersion by SteamService.familyPreferredCopyDataVersion.collectAsState()
         var showPreferredCopyMenuOption by remember(gameId) { mutableStateOf(false) }
@@ -918,6 +994,12 @@ class SteamAppScreen : BaseAppScreen() {
                 AppOptionMenuType.ImportManifestOverrides,
                 onClick = {
                     manifestOverridePicker.launch(arrayOf("*/*"))
+                },
+            )
+            options += AppMenuOption(
+                AppOptionMenuType.ImportManifestUrl,
+                onClick = {
+                    showManifestUrlDialog = true
                 },
             )
             if (hasManifestOverrides) {
