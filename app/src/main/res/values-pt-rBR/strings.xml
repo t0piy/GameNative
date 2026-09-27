@@ -2572,4 +2572,18 @@
     <string name="manifest_provider_luatools_signing_in">Entrando…</string>
     <string name="manifest_provider_luatools_login_success">Sessão lua.tools configurada.</string>
     <string name="manifest_provider_credentials_cleared">Credenciais removidas.</string>
+    <string name="option_view_manifest_overrides">Ver manifestos ativos</string>
+    <string name="manifest_overrides_title">Manifestos ativos</string>
+    <string name="manifest_overrides_empty">Nenhuma substituição de manifesto está ativa para este jogo.</string>
+    <string name="manifest_override_depot">Depot %1$d</string>
+    <string name="manifest_override_gid">Manifest GID: %1$s</string>
+    <string name="manifest_override_size">Tamanho instalado: %1$s</string>
+    <string name="manifest_override_source">Origem: %1$s</string>
+    <string name="manifest_override_imported_at">Importado em: %1$s</string>
+    <string name="manifest_override_source_local">Arquivo local</string>
+    <string name="manifest_override_source_url">URL remota</string>
+    <string name="manifest_override_source_direct">Provider direto</string>
+    <string name="manifest_override_source_luatools">Provider via lua.tools</string>
+    <string name="manifest_override_source_hubcap">Hubcap</string>
+    <string name="manifest_override_source_unknown">Origem desconhecida</string>
 </resources>
