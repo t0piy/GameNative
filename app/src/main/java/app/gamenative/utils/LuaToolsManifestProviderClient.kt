@@ -291,6 +291,62 @@ object LuaToolsManifestProviderClient {
         }
     }
 
+    /**
+     * Fetch one raw depot manifest through lua.tools when a selected override only carries a GID.
+     * This never supplies depot keys or entitlement material; Steam authorization remains required
+     * before GameDownloadService stages and decrypts the manifest.
+     */
+    suspend fun ensureRawDepotManifest(
+        context: Context,
+        namespaceAppId: Int,
+        depotId: Int,
+        manifestId: Long,
+        provenance: ManifestOverrideProvenance? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
+        require(namespaceAppId > 0) { "Invalid manifest namespace app id" }
+        require(depotId > 0) { "Invalid depot id" }
+        require(manifestId != 0L) { "Invalid manifest id" }
+
+        if (
+            SteamManifestOverrideStore.hasLocalManifest(
+                context = context,
+                appId = namespaceAppId,
+                depotId = depotId,
+                manifestId = manifestId,
+            )
+        ) {
+            return@withContext true
+        }
+
+        if (ManifestProviderAuthManager.getCredentials(context).luaToolsSession == null) {
+            return@withContext false
+        }
+
+        val bearer = ManifestProviderAuthManager.getValidLuaToolsAccessToken(context)
+        val unsignedManifestId = java.lang.Long.toUnsignedString(manifestId)
+        val request = Request.Builder()
+            .url(
+                "$LUA_TOOLS_API_BASE/api/givemethemanifestpunk/" +
+                    "$depotId/$unsignedManifestId",
+            )
+            .header("Authorization", "Bearer $bearer")
+            .get()
+            .build()
+
+        val bytes = executeDownload(request)
+        SteamManifestOverrideStore.saveManifest(
+            context = context,
+            appId = namespaceAppId,
+            fileName = "${depotId}_${unsignedManifestId}.manifest",
+            bytes = bytes,
+            provenance = provenance ?: ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.LuaToolsProvider,
+                sourceLabel = "lua.tools depot manifest",
+            ),
+        )
+        true
+    }
+
     suspend fun downloadLuaToolsDlcMetadata(
         context: Context,
         baseAppId: Int,
