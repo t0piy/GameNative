@@ -2745,4 +2745,33 @@
     <string name="manifest_override_namespace">Target AppID: %1$d</string>
     <string name="manifest_provider_luatools_dlc">lua.tools DLC metadata</string>
     <string name="manifest_provider_luatools_dlc_description">Uses lua.tools\' DLC-specific endpoint for the selected AppID. Requires a lua.tools session.</string>
+
+    <!-- Steam Explorer -->
+    <string name="explorer_steam_filters">Filters</string>
+    <string name="explorer_steam_filters_count">Filters (%1$d)</string>
+    <string name="explorer_steam_results_count">%1$d Steam Store results</string>
+    <string name="explorer_steam_cache">cached</string>
+    <string name="explorer_steam_cache_stale">cached · offline fallback</string>
+    <string name="explorer_steam_login_for_luatools">Sign in to Steam to open AppIDs with LuaTools.</string>
+    <string name="explorer_steam_search_error">Steam Store refresh failed: %1$s</string>
+    <string name="explorer_steam_open_store">Open in Steam Store</string>
+    <string name="explorer_steam_no_results">No Steam Store products match this search and filter combination.</string>
+    <string name="explorer_steam_filters_title">Steam Store filters</string>
+    <string name="explorer_steam_filters_active">%1$d active filters</string>
+    <string name="explorer_steam_filters_clear">Clear all</string>
+    <string name="explorer_steam_sort">Sort by</string>
+    <string name="explorer_steam_price_discount">Price, discounts &amp; events</string>
+    <string name="explorer_steam_max_price">Maximum price</string>
+    <string name="explorer_steam_specials_only">Specials and discounted items only</string>
+    <string name="explorer_steam_hide_f2p">Hide free-to-play items</string>
+    <string name="explorer_steam_filter_search">Find a filter, tag, language, feature…</string>
+    <string name="explorer_steam_loading_filters">Loading the current Steam filter catalog…</string>
+    <string name="explorer_steam_filter_fallback">Steam filter metadata could not be refreshed. Cached or built-in fallback controls are being shown.</string>
+    <string name="explorer_steam_tag_include">Include</string>
+    <string name="explorer_steam_tag_exclude">Exclude</string>
+    <string name="explorer_steam_tag_off">Off</string>
+    <string name="explorer_steam_cache_title">Search cache</string>
+    <string name="explorer_steam_cache_description">Recent Store searches and the live filter/tag catalog are cached locally for faster repeat searches and temporary offline fallback.</string>
+    <string name="explorer_steam_cache_clear">Clear Steam Explorer cache</string>
+
 </resources>
