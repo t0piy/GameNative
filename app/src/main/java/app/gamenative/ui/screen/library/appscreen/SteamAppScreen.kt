@@ -2181,13 +2181,24 @@ class SteamAppScreen : BaseAppScreen() {
                                 }
 
                                 val fastFetch = runCatching {
-                                    LuaToolsManifestProviderClient.fastFetch(
-                                        context = context,
-                                        appId = targetAppId,
-                                        gameName = targetName,
-                                        allowCleartextDirect =
-                                            PrefManager.manifestFastFetchAllowCleartext,
-                                    )
+                                    if (targetAppId == gameId) {
+                                        LuaToolsManifestProviderClient.fastFetch(
+                                            context = context,
+                                            appId = targetAppId,
+                                            gameName = targetName,
+                                            allowCleartextDirect =
+                                                PrefManager.manifestFastFetchAllowCleartext,
+                                        )
+                                    } else {
+                                        LuaToolsManifestProviderClient.fastFetchDlc(
+                                            context = context,
+                                            baseAppId = gameId,
+                                            dlcAppId = targetAppId,
+                                            gameName = targetName,
+                                            allowCleartextDirect =
+                                                PrefManager.manifestFastFetchAllowCleartext,
+                                        )
+                                    }
                                 }.onFailure {
                                     // Optional metadata fetch: Steam remains the fallback.
                                     Timber.w(
