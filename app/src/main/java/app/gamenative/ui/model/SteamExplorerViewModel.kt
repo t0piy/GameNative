@@ -518,7 +518,11 @@ class SteamExplorerViewModel @Inject constructor(
         _state.update { it.copy(openingAppId = appId) }
         viewModelScope.launch {
             val hydrated = withContext(Dispatchers.IO) {
-                SteamService.hydratePublicAppInfo(appId)
+                val app = SteamService.hydratePublicAppInfo(appId)
+                if (app != null) {
+                    SteamService.hydratePublicDlcMetadata(appId)
+                }
+                app
             }
             _state.update { it.copy(openingAppId = null) }
             val iconHash = hydrated
