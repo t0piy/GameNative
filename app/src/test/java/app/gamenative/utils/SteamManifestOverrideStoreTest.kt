@@ -134,6 +134,42 @@ class SteamManifestOverrideStoreTest {
     }
 
     @Test
+    fun persistsAndReplacesOverrideProvenancePerDepot() {
+        SteamManifestOverrideStore.saveLua(
+            context = context,
+            appId = appId,
+            luaText = """setManifestid(481, "111", 1000)""",
+            provenance = ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.DirectProvider,
+                sourceLabel = "Ryuu",
+                importedAtEpochMillis = 1_700_000_000_000L,
+            ),
+        )
+
+        val first = SteamManifestOverrideStore.load(context, appId)[481]
+        assertEquals(111L, first?.manifestId)
+        assertEquals(ManifestOverrideSourceKind.DirectProvider, first?.provenance?.sourceKind)
+        assertEquals("Ryuu", first?.provenance?.sourceLabel)
+        assertEquals(1_700_000_000_000L, first?.provenance?.importedAtEpochMillis)
+
+        SteamManifestOverrideStore.saveLua(
+            context = context,
+            appId = appId,
+            luaText = """setManifestid(481, "222", 2000)""",
+            provenance = ManifestOverrideProvenance(
+                sourceKind = ManifestOverrideSourceKind.DirectProvider,
+                sourceLabel = "Sushi",
+                importedAtEpochMillis = 1_700_000_100_000L,
+            ),
+        )
+
+        val replaced = SteamManifestOverrideStore.load(context, appId)[481]
+        assertEquals(222L, replaced?.manifestId)
+        assertEquals("Sushi", replaced?.provenance?.sourceLabel)
+        assertEquals(1_700_000_100_000L, replaced?.provenance?.importedAtEpochMillis)
+    }
+
+    @Test
     fun providerZipImportsMatchingLuaAndIgnoresOtherFiles() {
         val lua = """
             addappid(480)
