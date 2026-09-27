@@ -439,6 +439,42 @@ object SteamManifestOverrideStore {
     fun find(context: Context, appId: Int, depotId: Int): SteamManifestOverride? =
         load(context, appId)[depotId]
 
+    fun owningAppId(
+        parentAppId: Int,
+        dlcAppId: Int,
+        depotFromApp: Int,
+        invalidAppId: Int,
+    ): Int = when {
+        dlcAppId != invalidAppId -> dlcAppId
+        depotFromApp != invalidAppId -> depotFromApp
+        else -> parentAppId
+    }
+
+    /**
+     * DLC-aware lookup. The depot owner's namespace wins; the parent namespace is a compatibility
+     * fallback for overrides imported before DLC namespaces were introduced.
+     */
+    fun findForDepot(
+        context: Context,
+        parentAppId: Int,
+        depotId: Int,
+        dlcAppId: Int,
+        depotFromApp: Int,
+        invalidAppId: Int,
+    ): SteamManifestOverride? {
+        val ownerAppId = owningAppId(
+            parentAppId = parentAppId,
+            dlcAppId = dlcAppId,
+            depotFromApp = depotFromApp,
+            invalidAppId = invalidAppId,
+        )
+        find(context, ownerAppId, depotId)?.let { return it }
+        if (ownerAppId != parentAppId) {
+            return find(context, parentAppId, depotId)
+        }
+        return null
+    }
+
     /**
      * Copy a matching private raw manifest into the downloader's normal manifest cache.
      *
@@ -446,6 +482,44 @@ object SteamManifestOverrideStore {
      * staged file, verifies that its metadata depot/GID match, decrypts filenames with the Steam
      * key and otherwise falls back to its normal CDN manifest fetch path if the cache is unusable.
      */
+    fun stageLocalManifestForDepot(
+        context: Context,
+        parentAppId: Int,
+        depotId: Int,
+        dlcAppId: Int,
+        depotFromApp: Int,
+        invalidAppId: Int,
+        manifestId: Long,
+        installDir: String,
+    ): Boolean {
+        val ownerAppId = owningAppId(
+            parentAppId = parentAppId,
+            dlcAppId = dlcAppId,
+            depotFromApp = depotFromApp,
+            invalidAppId = invalidAppId,
+        )
+        if (
+            stageLocalManifest(
+                context = context,
+                appId = ownerAppId,
+                depotId = depotId,
+                manifestId = manifestId,
+                installDir = installDir,
+            )
+        ) {
+            return true
+        }
+
+        return ownerAppId != parentAppId &&
+            stageLocalManifest(
+                context = context,
+                appId = parentAppId,
+                depotId = depotId,
+                manifestId = manifestId,
+                installDir = installDir,
+            )
+    }
+
     fun stageLocalManifest(
         context: Context,
         appId: Int,
