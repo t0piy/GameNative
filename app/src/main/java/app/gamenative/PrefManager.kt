@@ -180,6 +180,13 @@ object PrefManager {
             setPref(LAST_PICS_CHANGE_NUMBER, value)
         }
 
+    private val STEAM_CATALOG_CHANGE_NUMBER = intPreferencesKey("steam_catalog_change_number")
+    var steamCatalogChangeNumber: Int
+        get() = getPref(STEAM_CATALOG_CHANGE_NUMBER, 0)
+        set(value) {
+            setPref(STEAM_CATALOG_CHANGE_NUMBER, value)
+        }
+
     /* Container Default Settings */
     private val SCREEN_SIZE = stringPreferencesKey("screen_size")
     var screenSize: String
