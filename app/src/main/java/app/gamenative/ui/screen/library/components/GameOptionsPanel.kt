@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Face4
 import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
@@ -259,7 +260,8 @@ private fun OptionItem(
     val icon = getIconForOption(option.optionType)
     val isDestructive = option.optionType == AppOptionMenuType.Uninstall ||
         option.optionType == AppOptionMenuType.ResetToDefaults ||
-        option.optionType == AppOptionMenuType.ResetDrm
+        option.optionType == AppOptionMenuType.ResetDrm ||
+        option.optionType == AppOptionMenuType.ClearManifestOverrides
 
     Row(
         modifier = Modifier
@@ -364,6 +366,11 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ExportFiles -> Icons.Default.FileDownload
         AppOptionMenuType.ManageMods -> Icons.Default.Extension
         AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
+        AppOptionMenuType.ViewManifestOverrides -> Icons.Default.Info
+        AppOptionMenuType.FindManifestProviders -> Icons.Default.CloudDownload
+        AppOptionMenuType.ImportManifestOverrides -> Icons.Default.FileDownload
+        AppOptionMenuType.ImportManifestUrl -> Icons.Default.CloudDownload
+        AppOptionMenuType.ClearManifestOverrides -> Icons.Default.Delete
         AppOptionMenuType.ChangePreferredCopy -> Icons.Filled.Face4
         AppOptionMenuType.AddToFavorites -> Icons.Filled.StarOutline
         AppOptionMenuType.RemoveFromFavorites -> Icons.Filled.Star
@@ -398,6 +405,11 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.MoveToInternalStorage,
             AppOptionMenuType.ChangeBranch,
             AppOptionMenuType.ChangePreferredCopy,
+            AppOptionMenuType.ViewManifestOverrides,
+            AppOptionMenuType.FindManifestProviders,
+            AppOptionMenuType.ImportManifestOverrides,
+            AppOptionMenuType.ImportManifestUrl,
+            AppOptionMenuType.ClearManifestOverrides,
             -> gameManagement.add(option)
 
             // Container Settings

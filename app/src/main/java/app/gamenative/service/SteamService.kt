@@ -63,6 +63,8 @@ import app.gamenative.utils.LsfgVkManager
 import app.gamenative.utils.MarkerUtils
 import app.gamenative.utils.Net
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverride
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.asyncIsolated
 import app.gamenative.utils.CURRENT_UFS_PARSE_VERSION
 import app.gamenative.utils.generateSteamApp
@@ -2522,11 +2524,33 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // credits decompressed chunk bytes written, so the progress bar and ETA must be
                 // in the same unit (previously getDownloadBytes = compressed → the bar could
                 // clamp at 100% before the depot was actually done).
+                val context = instance?.applicationContext
+                val overrideCache = mutableMapOf<Int, Map<Int, SteamManifestOverride>>()
+                fun overridesFor(namespaceAppId: Int): Map<Int, SteamManifestOverride> {
+                    if (context == null || namespaceAppId <= 0) return emptyMap()
+                    return overrideCache.getOrPut(namespaceAppId) {
+                        SteamManifestOverrideStore.load(context, namespaceAppId)
+                    }
+                }
                 val sizes = selectedDepots.map { (_, depot) ->
                     val mInfo = depot.manifests[branch]
                         ?: depot.encryptedManifests[branch]
                         ?: return@map 1L
-                    mInfo.size.coerceAtLeast(1L)
+                    val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                        parentAppId = appId,
+                        dlcAppId = depot.dlcAppId,
+                        depotFromApp = depot.depotFromApp,
+                        invalidAppId = INVALID_APP_ID,
+                    )
+                    val override = overridesFor(ownerAppId)[depot.depotId]
+                        ?: if (ownerAppId != appId) {
+                            overridesFor(appId)[depot.depotId]
+                        } else {
+                            null
+                        }
+                    override?.sizeOnDisk
+                        ?.coerceAtLeast(1L)
+                        ?: mInfo.size.coerceAtLeast(1L)
                 }
                 sizes.forEachIndexed { i, bytes -> di.setWeight(i, bytes) }
 

@@ -1427,6 +1427,21 @@ object PrefManager {
             setPref(DOWNLOAD_ON_WIFI_ONLY, value)
         }
 
+    private val MANIFEST_FAST_FETCH = booleanPreferencesKey("manifest_fast_fetch")
+    var manifestFastFetch: Boolean
+        get() = getPref(MANIFEST_FAST_FETCH, true)
+        set(value) {
+            setPref(MANIFEST_FAST_FETCH, value)
+        }
+
+    private val MANIFEST_FAST_FETCH_ALLOW_CLEARTEXT =
+        booleanPreferencesKey("manifest_fast_fetch_allow_cleartext")
+    var manifestFastFetchAllowCleartext: Boolean
+        get() = getPref(MANIFEST_FAST_FETCH_ALLOW_CLEARTEXT, false)
+        set(value) {
+            setPref(MANIFEST_FAST_FETCH_ALLOW_CLEARTEXT, value)
+        }
+
     // Maximum number of concurrent downloads (8=slow, 16=medium, 24=fast, 32=blazing)
     private val DOWNLOAD_SPEED = intPreferencesKey("download_speed")
     var downloadSpeed: Int

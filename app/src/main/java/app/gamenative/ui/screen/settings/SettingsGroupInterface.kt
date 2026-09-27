@@ -73,6 +73,7 @@ import androidx.compose.foundation.layout.width
 import kotlin.math.roundToInt
 import com.winlator.core.AppUtils
 import app.gamenative.ui.component.dialog.MessageDialog
+import app.gamenative.ui.component.dialog.ManifestProviderCredentialsDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -136,6 +137,12 @@ fun SettingsGroupInterface(
     onPaletteStyle: (PaletteStyle) -> Unit,
 ) {
     val context = LocalContext.current
+
+    var showManifestProviderCredentials by rememberSaveable { mutableStateOf(false) }
+    ManifestProviderCredentialsDialog(
+        visible = showManifestProviderCredentials,
+        onDismissRequest = { showManifestProviderCredentials = false },
+    )
 
     var openWebLinks by rememberSaveable { mutableStateOf(PrefManager.openWebLinksExternally) }
 
@@ -540,6 +547,50 @@ fun SettingsGroupInterface(
                 wifiOnlyDownload = it
                 PrefManager.downloadOnWifiOnly = it
             },
+        )
+
+        var manifestFastFetch by rememberSaveable {
+            mutableStateOf(PrefManager.manifestFastFetch)
+        }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_manifest_fast_fetch_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_manifest_fast_fetch_subtitle)) },
+            state = manifestFastFetch,
+            onCheckedChange = {
+                manifestFastFetch = it
+                PrefManager.manifestFastFetch = it
+            },
+        )
+
+        var manifestFastFetchAllowCleartext by rememberSaveable {
+            mutableStateOf(PrefManager.manifestFastFetchAllowCleartext)
+        }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            enabled = manifestFastFetch,
+            title = {
+                Text(text = stringResource(R.string.settings_manifest_fast_fetch_cleartext_title))
+            },
+            subtitle = {
+                Text(text = stringResource(R.string.settings_manifest_fast_fetch_cleartext_subtitle))
+            },
+            state = manifestFastFetchAllowCleartext,
+            onCheckedChange = {
+                manifestFastFetchAllowCleartext = it
+                PrefManager.manifestFastFetchAllowCleartext = it
+            },
+        )
+
+        SettingsMenuLink(
+            colors = settingsTileColorsAlt(),
+            title = {
+                Text(text = stringResource(R.string.manifest_provider_credentials_settings_title))
+            },
+            subtitle = {
+                Text(text = stringResource(R.string.manifest_provider_credentials_settings_subtitle))
+            },
+            onClick = { showManifestProviderCredentials = true },
         )
 
         // Download speed setting

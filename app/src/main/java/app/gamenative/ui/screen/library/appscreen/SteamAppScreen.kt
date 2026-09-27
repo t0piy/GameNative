@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,8 @@ import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.service.SteamService.Companion.getAppDirPath
 import app.gamenative.ui.component.dialog.MessageDialog
+import app.gamenative.ui.component.dialog.ManifestOverridesDialog
+import app.gamenative.ui.component.dialog.ManifestProviderCredentialsDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.state.MessageDialogState
 import app.gamenative.ui.data.Achievement
@@ -69,7 +72,12 @@ import app.gamenative.ui.enums.AppOptionMenuType
 import app.gamenative.ui.enums.DialogType
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.MarkerUtils
+import app.gamenative.utils.LuaToolsManifestProviderClient
+import app.gamenative.utils.LuaToolsManifestSource
+import app.gamenative.utils.LuaToolsProviderTransport
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamManifestOverride
+import app.gamenative.utils.SteamManifestOverrideStore
 import app.gamenative.utils.StorageUtils
 import app.gamenative.workshop.WorkshopManager
 import app.gamenative.NetworkMonitor
@@ -814,6 +822,7 @@ class SteamAppScreen : BaseAppScreen() {
         return SteamSaveTransfer.importSaves(context, container, libraryItem.gameId, uri)
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun getSourceSpecificMenuOptions(
         context: Context,
@@ -828,6 +837,563 @@ class SteamAppScreen : BaseAppScreen() {
         val appInfo = SteamService.getAppInfoOf(gameId) ?: return emptyList()
         val isDownloadInProgress = SteamService.getDownloadingAppInfoOf(gameId) != null
         val scope = rememberCoroutineScope()
+        var manifestTargetAppIds by remember(gameId) { mutableStateOf(listOf(gameId)) }
+        var selectedManifestTargetAppId by remember(gameId) { mutableIntStateOf(gameId) }
+        var hasManifestOverrides by remember(gameId) {
+            mutableStateOf(SteamManifestOverrideStore.hasOverrides(context, gameId))
+        }
+
+        fun manifestTargetLabel(targetAppId: Int): String {
+            if (targetAppId == gameId) {
+                return context.getString(R.string.manifest_target_base, gameId)
+            }
+            val name = SteamService.getAppInfoOf(targetAppId)?.name
+                ?.takeIf { it.isNotBlank() }
+                ?: "DLC"
+            return context.getString(
+                R.string.manifest_target_dlc,
+                name,
+                targetAppId,
+            )
+        }
+
+        LaunchedEffect(gameId, isDownloadInProgress) {
+            val targets = withContext(Dispatchers.IO) {
+                val depots = SteamService.getDownloadableDepots(gameId)
+                buildList {
+                    add(gameId)
+                    addAll(
+                        depots.values
+                            .asSequence()
+                            .map { it.dlcAppId }
+                            .filter { it != SteamService.INVALID_APP_ID && it > 0 && it != gameId }
+                            .distinct()
+                            .sorted()
+                            .toList(),
+                    )
+                }
+            }
+            manifestTargetAppIds = targets
+            if (selectedManifestTargetAppId !in targets) {
+                selectedManifestTargetAppId = gameId
+            }
+            hasManifestOverrides = withContext(Dispatchers.IO) {
+                targets.any { SteamManifestOverrideStore.hasOverrides(context, it) }
+            }
+        }
+        var showManifestOverridesDialog by remember(gameId) { mutableStateOf(false) }
+        var activeManifestOverrides by remember(gameId) {
+            mutableStateOf<List<SteamManifestOverride>>(emptyList())
+        }
+
+        ManifestOverridesDialog(
+            visible = showManifestOverridesDialog,
+            overrides = activeManifestOverrides,
+            onDismissRequest = { showManifestOverridesDialog = false },
+        )
+        var showManifestFileTargetDialog by remember(gameId) { mutableStateOf(false) }
+
+        val manifestOverridePicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) {
+                scope.launch {
+                    try {
+                        val count = withContext(Dispatchers.IO) {
+                            val bytes = context.contentResolver.openInputStream(uri)
+                                ?.use { it.readBytes() }
+                                ?: error("Could not read selected file")
+                            val displayName = context.contentResolver.query(
+                                uri,
+                                arrayOf(OpenableColumns.DISPLAY_NAME),
+                                null,
+                                null,
+                                null,
+                            )?.use { cursor ->
+                                if (cursor.moveToFirst()) cursor.getString(0) else null
+                            } ?: uri.lastPathSegment.orEmpty()
+
+                            SteamManifestOverrideStore.importArtifact(
+                                context = context,
+                                appId = selectedManifestTargetAppId,
+                                fileName = displayName,
+                                bytes = bytes,
+                            )
+                        }
+                        hasManifestOverrides = true
+                        SnackbarManager.show(
+                            context.getString(R.string.manifest_overrides_imported, count),
+                        )
+                    } catch (e: Exception) {
+                        Timber.w(
+                            e,
+                            "Manifest override import failed for app $selectedManifestTargetAppId",
+                        )
+                        SnackbarManager.show(
+                            context.getString(
+                                R.string.manifest_overrides_import_failed,
+                                e.message ?: e.javaClass.simpleName,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        if (showManifestFileTargetDialog) {
+            AlertDialog(
+                onDismissRequest = { showManifestFileTargetDialog = false },
+                title = { Text(stringResource(R.string.option_import_manifest_overrides)) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(stringResource(R.string.manifest_target_label))
+                        manifestTargetAppIds.forEach { targetAppId ->
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    selectedManifestTargetAppId = targetAppId
+                                    showManifestFileTargetDialog = false
+                                    manifestOverridePicker.launch(arrayOf("*/*"))
+                                },
+                            ) {
+                                Text(manifestTargetLabel(targetAppId))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showManifestFileTargetDialog = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
+        var showManifestProvidersDialog by remember(gameId) { mutableStateOf(false) }
+        var showManifestProviderCredentialsDialog by remember(gameId) {
+            mutableStateOf(false)
+        }
+        var manifestProviders by remember(gameId) {
+            mutableStateOf<List<LuaToolsManifestSource>>(emptyList())
+        }
+        var checkingManifestProviders by remember(gameId) { mutableStateOf(false) }
+        var manifestProviderError by remember(gameId) { mutableStateOf<String?>(null) }
+        var downloadingManifestProvider by remember(gameId) { mutableStateOf<String?>(null) }
+        var manifestTargetDropdownExpanded by remember(gameId) { mutableStateOf(false) }
+
+        ManifestProviderCredentialsDialog(
+            visible = showManifestProviderCredentialsDialog,
+            onDismissRequest = {
+                showManifestProviderCredentialsDialog = false
+                showManifestProvidersDialog = true
+            },
+            onSaved = {
+                showManifestProviderCredentialsDialog = false
+                showManifestProvidersDialog = true
+                checkingManifestProviders = true
+                manifestProviderError = null
+                scope.launch {
+                    try {
+                        manifestProviders =
+                            LuaToolsManifestProviderClient.checkSources(
+                                context,
+                                selectedManifestTargetAppId,
+                            )
+                    } catch (e: Exception) {
+                        manifestProviderError =
+                            e.message ?: e.javaClass.simpleName
+                    } finally {
+                        checkingManifestProviders = false
+                    }
+                }
+            },
+        )
+
+        if (showManifestProvidersDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (downloadingManifestProvider == null) {
+                        showManifestProvidersDialog = false
+                    }
+                },
+                title = { Text(stringResource(R.string.manifest_providers_title)) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ExposedDropdownMenuBox(
+                            expanded = manifestTargetDropdownExpanded,
+                            onExpandedChange = {
+                                if (downloadingManifestProvider == null) {
+                                    manifestTargetDropdownExpanded = it
+                                }
+                            },
+                        ) {
+                            NoExtractOutlinedTextField(
+                                value = manifestTargetLabel(selectedManifestTargetAppId),
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = downloadingManifestProvider == null,
+                                singleLine = true,
+                                label = { Text(stringResource(R.string.manifest_target_label)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = manifestTargetDropdownExpanded,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = manifestTargetDropdownExpanded,
+                                onDismissRequest = {
+                                    manifestTargetDropdownExpanded = false
+                                },
+                            ) {
+                                manifestTargetAppIds.forEach { targetAppId ->
+                                    DropdownMenuItem(
+                                        text = { Text(manifestTargetLabel(targetAppId)) },
+                                        onClick = {
+                                            selectedManifestTargetAppId = targetAppId
+                                            manifestTargetDropdownExpanded = false
+                                            checkingManifestProviders = true
+                                            manifestProviderError = null
+                                            manifestProviders = emptyList()
+                                            scope.launch {
+                                                try {
+                                                    manifestProviders =
+                                                        LuaToolsManifestProviderClient.checkSources(
+                                                            context,
+                                                            targetAppId,
+                                                        )
+                                                } catch (e: Exception) {
+                                                    manifestProviderError =
+                                                        e.message ?: e.javaClass.simpleName
+                                                } finally {
+                                                    checkingManifestProviders = false
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        when {
+                            checkingManifestProviders -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                    Text(stringResource(R.string.manifest_providers_checking))
+                                }
+                            }
+
+                            manifestProviderError != null -> {
+                                Text(manifestProviderError.orEmpty())
+                            }
+
+                            manifestProviders.isEmpty() -> {
+                                Text(stringResource(R.string.manifest_providers_none))
+                            }
+
+                            else -> {
+                                manifestProviders.forEach { source ->
+                                    val transportLabel = when (source.transport) {
+                                        LuaToolsProviderTransport.Direct ->
+                                            stringResource(R.string.manifest_provider_direct)
+                                        LuaToolsProviderTransport.LuaToolsProxy ->
+                                            stringResource(R.string.manifest_provider_proxy_auth)
+                                        LuaToolsProviderTransport.Hubcap ->
+                                            stringResource(R.string.manifest_provider_hubcap_key)
+                                    }
+                                    TextButton(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = source.canAttemptDownload &&
+                                            downloadingManifestProvider == null,
+                                        onClick = {
+                                            downloadingManifestProvider = source.name
+                                            manifestProviderError = null
+                                            scope.launch {
+                                                try {
+                                                    val count =
+                                                        LuaToolsManifestProviderClient.downloadProvider(
+                                                            context = context,
+                                                            appId = selectedManifestTargetAppId,
+                                                            sourceName = source.name,
+                                                            gameName = SteamService
+                                                                .getAppInfoOf(selectedManifestTargetAppId)
+                                                                ?.name
+                                                                ?: libraryItem.name,
+                                                        )
+                                                    hasManifestOverrides = true
+                                                    showManifestProvidersDialog = false
+                                                    SnackbarManager.show(
+                                                        context.getString(
+                                                            R.string.manifest_overrides_imported,
+                                                            count,
+                                                        ),
+                                                    )
+                                                } catch (e: Exception) {
+                                                    Timber.w(
+                                                        e,
+                                                        "Manifest provider download failed app=" +
+                                                            "$selectedManifestTargetAppId source=${source.name}",
+                                                    )
+                                                    manifestProviderError =
+                                                        e.message ?: e.javaClass.simpleName
+                                                } finally {
+                                                    downloadingManifestProvider = null
+                                                }
+                                            }
+                                        },
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalAlignment = Alignment.Start,
+                                        ) {
+                                            Text(source.displayName)
+                                            Text(
+                                                text = if (
+                                                    downloadingManifestProvider == source.name
+                                                ) {
+                                                    context.getString(
+                                                        R.string.manifest_provider_downloading,
+                                                        source.displayName,
+                                                    )
+                                                } else {
+                                                    "${source.status} · $transportLabel"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (selectedManifestTargetAppId != gameId) {
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = downloadingManifestProvider == null &&
+                                    !checkingManifestProviders,
+                                onClick = {
+                                    val targetAppId = selectedManifestTargetAppId
+                                    downloadingManifestProvider = "lua.tools DLC"
+                                    manifestProviderError = null
+                                    scope.launch {
+                                        try {
+                                            val count =
+                                                LuaToolsManifestProviderClient
+                                                    .downloadLuaToolsDlcMetadata(
+                                                        context = context,
+                                                        baseAppId = gameId,
+                                                        dlcAppId = targetAppId,
+                                                        gameName = SteamService
+                                                            .getAppInfoOf(targetAppId)
+                                                            ?.name,
+                                                    )
+                                            hasManifestOverrides = true
+                                            showManifestProvidersDialog = false
+                                            SnackbarManager.show(
+                                                context.getString(
+                                                    R.string.manifest_overrides_imported,
+                                                    count,
+                                                ),
+                                            )
+                                        } catch (e: Exception) {
+                                            Timber.w(
+                                                e,
+                                                "lua.tools DLC metadata download failed " +
+                                                    "base=$gameId dlc=$targetAppId",
+                                            )
+                                            manifestProviderError =
+                                                e.message ?: e.javaClass.simpleName
+                                        } finally {
+                                            downloadingManifestProvider = null
+                                        }
+                                    }
+                                },
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.Start,
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.manifest_provider_luatools_dlc,
+                                        ),
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.manifest_provider_luatools_dlc_description,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = downloadingManifestProvider == null,
+                        onClick = {
+                            showManifestProvidersDialog = false
+                            showManifestProviderCredentialsDialog = true
+                        },
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.manifest_provider_credentials_settings_title,
+                            ),
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = downloadingManifestProvider == null,
+                        onClick = { showManifestProvidersDialog = false },
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
+        var showManifestUrlDialog by remember(gameId) { mutableStateOf(false) }
+        var manifestUrl by remember(gameId) { mutableStateOf("") }
+        var importingManifestUrl by remember(gameId) { mutableStateOf(false) }
+        var manifestUrlTargetExpanded by remember(gameId) { mutableStateOf(false) }
+
+        if (showManifestUrlDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (!importingManifestUrl) showManifestUrlDialog = false
+                },
+                title = { Text(stringResource(R.string.manifest_url_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ExposedDropdownMenuBox(
+                            expanded = manifestUrlTargetExpanded,
+                            onExpandedChange = {
+                                if (!importingManifestUrl) {
+                                    manifestUrlTargetExpanded = it
+                                }
+                            },
+                        ) {
+                            NoExtractOutlinedTextField(
+                                value = manifestTargetLabel(selectedManifestTargetAppId),
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = !importingManifestUrl,
+                                singleLine = true,
+                                label = { Text(stringResource(R.string.manifest_target_label)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = manifestUrlTargetExpanded,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = manifestUrlTargetExpanded,
+                                onDismissRequest = { manifestUrlTargetExpanded = false },
+                            ) {
+                                manifestTargetAppIds.forEach { targetAppId ->
+                                    DropdownMenuItem(
+                                        text = { Text(manifestTargetLabel(targetAppId)) },
+                                        onClick = {
+                                            selectedManifestTargetAppId = targetAppId
+                                            manifestUrlTargetExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        NoExtractOutlinedTextField(
+                            value = manifestUrl,
+                            onValueChange = { manifestUrl = it },
+                            label = { Text(stringResource(R.string.manifest_url_label)) },
+                            singleLine = true,
+                            enabled = !importingManifestUrl,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (importingManifestUrl) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                Text(stringResource(R.string.manifest_url_import))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = manifestUrl.isNotBlank() && !importingManifestUrl,
+                        onClick = {
+                            importingManifestUrl = true
+                            scope.launch {
+                                try {
+                                    val count = SteamManifestOverrideStore.importFromUrl(
+                                        context = context,
+                                        appId = selectedManifestTargetAppId,
+                                        url = manifestUrl,
+                                    )
+                                    hasManifestOverrides = true
+                                    showManifestUrlDialog = false
+                                    manifestUrl = ""
+                                    SnackbarManager.show(
+                                        context.getString(R.string.manifest_overrides_imported, count),
+                                    )
+                                } catch (e: Exception) {
+                                    Timber.w(
+                                        e,
+                                        "Remote manifest import failed for app " +
+                                            "$selectedManifestTargetAppId",
+                                    )
+                                    SnackbarManager.show(
+                                        context.getString(
+                                            R.string.manifest_overrides_import_failed,
+                                            e.message ?: e.javaClass.simpleName,
+                                        ),
+                                    )
+                                } finally {
+                                    importingManifestUrl = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.manifest_url_import))
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !importingManifestUrl,
+                        onClick = { showManifestUrlDialog = false },
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
         val familyGroupId by SteamService.familyGroupIdFlow.collectAsState()
         val familyPreferredCopyDataVersion by SteamService.familyPreferredCopyDataVersion.collectAsState()
         var showPreferredCopyMenuOption by remember(gameId) { mutableStateOf(false) }
@@ -854,7 +1420,139 @@ class SteamAppScreen : BaseAppScreen() {
                     showBranchDialog(gameId)
                 },
             ),
+            AppMenuOption(
+                AppOptionMenuType.ViewManifestOverrides,
+                onClick = {
+                    scope.launch {
+                        activeManifestOverrides = withContext(Dispatchers.IO) {
+                            val depots = SteamService.getDownloadableDepots(gameId)
+                            val namespaceIds = buildSet {
+                                add(gameId)
+                                depots.values.forEach { depot ->
+                                    add(
+                                        SteamManifestOverrideStore.owningAppId(
+                                            parentAppId = gameId,
+                                            dlcAppId = depot.dlcAppId,
+                                            depotFromApp = depot.depotFromApp,
+                                            invalidAppId = SteamService.INVALID_APP_ID,
+                                        ),
+                                    )
+                                }
+                            }
+                            val overridesByApp = namespaceIds.associateWith { namespaceAppId ->
+                                SteamManifestOverrideStore.load(context, namespaceAppId)
+                            }
+
+                            depots.values.mapNotNull { depot ->
+                                val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                                    parentAppId = gameId,
+                                    dlcAppId = depot.dlcAppId,
+                                    depotFromApp = depot.depotFromApp,
+                                    invalidAppId = SteamService.INVALID_APP_ID,
+                                )
+                                overridesByApp[ownerAppId]?.get(depot.depotId)
+                                    ?: if (ownerAppId != gameId) {
+                                        overridesByApp[gameId]?.get(depot.depotId)
+                                    } else {
+                                        null
+                                    }
+                            }
+                                .distinctBy {
+                                    Pair(it.namespaceAppId ?: gameId, it.depotId)
+                                }
+                                .sortedWith(
+                                    compareBy<SteamManifestOverride>(
+                                        { it.namespaceAppId ?: gameId },
+                                        { it.depotId },
+                                    ),
+                                )
+                        }
+                        showManifestOverridesDialog = true
+                    }
+                },
+            ),
         )
+
+        if (!isDownloadInProgress) {
+            options += AppMenuOption(
+                AppOptionMenuType.FindManifestProviders,
+                onClick = {
+                    showManifestProvidersDialog = true
+                    checkingManifestProviders = true
+                    manifestProviderError = null
+                    manifestProviders = emptyList()
+                    scope.launch {
+                        try {
+                            manifestProviders =
+                                LuaToolsManifestProviderClient.checkSources(
+                                    context,
+                                    selectedManifestTargetAppId,
+                                )
+                        } catch (e: Exception) {
+                            Timber.w(e, "Manifest provider discovery failed for app $gameId")
+                            manifestProviderError =
+                                e.message ?: e.javaClass.simpleName
+                        } finally {
+                            checkingManifestProviders = false
+                        }
+                    }
+                },
+            )
+            options += AppMenuOption(
+                AppOptionMenuType.ImportManifestOverrides,
+                onClick = {
+                    if (manifestTargetAppIds.size > 1) {
+                        showManifestFileTargetDialog = true
+                    } else {
+                        selectedManifestTargetAppId = gameId
+                        manifestOverridePicker.launch(arrayOf("*/*"))
+                    }
+                },
+            )
+            options += AppMenuOption(
+                AppOptionMenuType.ImportManifestUrl,
+                onClick = {
+                    showManifestUrlDialog = true
+                },
+            )
+            if (hasManifestOverrides) {
+                options += AppMenuOption(
+                    AppOptionMenuType.ClearManifestOverrides,
+                    onClick = {
+                        scope.launch {
+                            val cleared = withContext(Dispatchers.IO) {
+                                val depots = SteamService.getDownloadableDepots(gameId)
+                                val namespacesToClear = buildSet {
+                                    add(gameId)
+                                    depots.values.forEach { depot ->
+                                        if (
+                                            depot.dlcAppId != SteamService.INVALID_APP_ID &&
+                                            depot.dlcAppId > 0
+                                        ) {
+                                            add(depot.dlcAppId)
+                                        }
+                                    }
+                                }
+                                namespacesToClear.all { namespaceAppId ->
+                                    SteamManifestOverrideStore.clear(context, namespaceAppId)
+                                }
+                            }
+                            if (cleared) {
+                                hasManifestOverrides = false
+                                activeManifestOverrides = emptyList()
+                                SnackbarManager.show(
+                                    context.getString(R.string.manifest_overrides_cleared),
+                                )
+                            } else {
+                                SnackbarManager.show(
+                                    context.getString(R.string.manifest_overrides_clear_failed),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+        }
 
         if (!isInstalled || isDownloadInProgress) {
             return options
@@ -1156,11 +1854,52 @@ class SteamAppScreen : BaseAppScreen() {
                     val depots = SteamService.getDownloadableDepots(gameId, language)
                     Timber.i("There are ${depots.size} depots belonging to ${libraryItem.appId}")
                     val branch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
-                    val availableBytes = StorageUtils.getAvailableSpaceForUncreatedPath(SteamService.getAppDirPath(gameId))
-                    val downloadBytes = depots.values.sumOf {
-                        SteamUtils.getDownloadBytes(it.manifests[branch])
+                    val namespaceIds = buildSet {
+                        add(gameId)
+                        depots.values.forEach { depot ->
+                            add(
+                                SteamManifestOverrideStore.owningAppId(
+                                    parentAppId = gameId,
+                                    dlcAppId = depot.dlcAppId,
+                                    depotFromApp = depot.depotFromApp,
+                                    invalidAppId = SteamService.INVALID_APP_ID,
+                                ),
+                            )
+                        }
                     }
-                    val installBytes = depots.values.sumOf { it.manifests[branch]?.size ?: 0 }
+                    val manifestOverridesByApp = namespaceIds.associateWith { namespaceAppId ->
+                        SteamManifestOverrideStore.load(context, namespaceAppId)
+                    }
+                    fun overrideFor(depot: app.gamenative.data.DepotInfo): SteamManifestOverride? {
+                        val ownerAppId = SteamManifestOverrideStore.owningAppId(
+                            parentAppId = gameId,
+                            dlcAppId = depot.dlcAppId,
+                            depotFromApp = depot.depotFromApp,
+                            invalidAppId = SteamService.INVALID_APP_ID,
+                        )
+                        return manifestOverridesByApp[ownerAppId]?.get(depot.depotId)
+                            ?: if (ownerAppId != gameId) {
+                                manifestOverridesByApp[gameId]?.get(depot.depotId)
+                            } else {
+                                null
+                            }
+                    }
+                    val availableBytes = StorageUtils.getAvailableSpaceForUncreatedPath(SteamService.getAppDirPath(gameId))
+                    val downloadBytes = depots.values.sumOf { depot ->
+                        overrideFor(depot)?.sizeOnDisk
+                            ?: SteamUtils.getDownloadBytes(
+                                depot.manifests[branch]
+                                    ?: depot.encryptedManifests[branch]
+                                    ?: depot.manifests["public"],
+                            )
+                    }
+                    val installBytes = depots.values.sumOf { depot ->
+                        overrideFor(depot)?.sizeOnDisk
+                            ?: depot.manifests[branch]?.size
+                            ?: depot.encryptedManifests[branch]?.size
+                            ?: depot.manifests["public"]?.size
+                            ?: 0L
+                    }
                     InstallSizeInfo(
                         downloadSize = StorageUtils.formatBinarySize(downloadBytes),
                         installSize = StorageUtils.formatBinarySize(installBytes),
@@ -1244,6 +1983,22 @@ class SteamAppScreen : BaseAppScreen() {
                         )
                         hideInstallDialog(gameId)
                         CoroutineScope(Dispatchers.IO).launch {
+                            if (
+                                SteamService.getInstalledApp(gameId) == null &&
+                                PrefManager.manifestFastFetch
+                            ) {
+                                runCatching {
+                                    LuaToolsManifestProviderClient.fastFetch(
+                                        context = context,
+                                        appId = gameId,
+                                        gameName = appInfo?.name ?: libraryItem.name,
+                                        allowCleartextDirect =
+                                            PrefManager.manifestFastFetchAllowCleartext,
+                                    )
+                                }.onFailure {
+                                    Timber.w(it, "Manifest FastFetch failed for app $gameId")
+                                }
+                            }
                             SteamService.downloadApp(gameId)
                         }
                     }
@@ -1496,7 +2251,84 @@ class SteamAppScreen : BaseAppScreen() {
                             ConversionTracker.campaignAttribution(gameId),
                     )
                     CoroutineScope(Dispatchers.IO).launch {
-                        SteamService.downloadApp(gameId, dlcAppIds, branch = branch, isUpdateOrVerify = false)
+                        if (PrefManager.manifestFastFetch) {
+                            SnackbarManager.show(
+                                context.getString(R.string.manifest_fast_fetch_checking),
+                            )
+
+                            val targets = buildList {
+                                if (installedApp == null) add(gameId)
+                                addAll(
+                                    dlcAppIds
+                                        .asSequence()
+                                        .filter { it > 0 && it != gameId }
+                                        .distinct()
+                                        .toList(),
+                                )
+                            }
+
+                            val usedSources = mutableListOf<String>()
+                            for (targetAppId in targets) {
+                                val targetName = if (targetAppId == gameId) {
+                                    appInfo?.name ?: libraryItem.name
+                                } else {
+                                    SteamService.getAppInfoOf(targetAppId)?.name
+                                        ?: "DLC $targetAppId"
+                                }
+
+                                val fastFetch = runCatching {
+                                    if (targetAppId == gameId) {
+                                        LuaToolsManifestProviderClient.fastFetch(
+                                            context = context,
+                                            appId = targetAppId,
+                                            gameName = targetName,
+                                            allowCleartextDirect =
+                                                PrefManager.manifestFastFetchAllowCleartext,
+                                        )
+                                    } else {
+                                        LuaToolsManifestProviderClient.fastFetchDlc(
+                                            context = context,
+                                            baseAppId = gameId,
+                                            dlcAppId = targetAppId,
+                                            gameName = targetName,
+                                            allowCleartextDirect =
+                                                PrefManager.manifestFastFetchAllowCleartext,
+                                        )
+                                    }
+                                }.onFailure {
+                                    // Optional metadata fetch: Steam remains the fallback.
+                                    Timber.w(
+                                        it,
+                                        "Manifest FastFetch failed for app $targetAppId " +
+                                            "(parent $gameId)",
+                                    )
+                                }.getOrNull()
+
+                                if (fastFetch != null) {
+                                    usedSources += if (targetAppId == gameId) {
+                                        fastFetch.sourceName
+                                    } else {
+                                        "${fastFetch.sourceName} (DLC $targetAppId)"
+                                    }
+                                }
+                            }
+
+                            if (usedSources.isNotEmpty()) {
+                                SnackbarManager.show(
+                                    context.getString(
+                                        R.string.manifest_fast_fetch_used,
+                                        usedSources.joinToString(", "),
+                                    ),
+                                )
+                            }
+                        }
+
+                        SteamService.downloadApp(
+                            gameId,
+                            dlcAppIds,
+                            branch = branch,
+                            isUpdateOrVerify = false,
+                        )
                     }
                 },
                 onDismissRequest = {
