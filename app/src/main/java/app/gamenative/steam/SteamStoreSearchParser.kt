@@ -316,7 +316,6 @@ object SteamStoreSearchParser {
         option("category1", "992", "Videos")
         option("category1", "997", "Mods")
         option("category1", "993", "Hardware")
-        option("category1", "996", "Bundles")
 
         option("category2", "2", "Single-player")
         option("category2", "1", "Multi-player")
