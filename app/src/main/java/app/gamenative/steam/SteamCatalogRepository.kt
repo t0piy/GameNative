@@ -64,7 +64,7 @@ object SteamCatalogRepository {
     private const val FILTER_CACHE_STALE_MS = 14 * 24 * 60 * 60 * 1000L
     private const val CACHE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000L
     private const val CACHE_MAX_ENTRIES = 120
-    private const val FILTER_CACHE_KEY = "steam-store:filters:v2"
+    private const val FILTER_CACHE_KEY_PREFIX = "steam-store:filters:v2"
 
     private val storeHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -90,7 +90,7 @@ object SteamCatalogRepository {
         forceRefresh: Boolean = false,
     ): SearchOutcome {
         val now = System.currentTimeMillis()
-        val cacheKey = "steam-store:search:v3:${filters.canonicalKey(query)}"
+        val cacheKey = "steam-store:search:v3:${steamCountry()}:${steamLanguage()}:${filters.canonicalKey(query)}"
         val cached = readSearchCache(cacheDao, cacheKey, now)
 
         if (!forceRefresh && cached != null && now - cached.first.updatedAt <= SEARCH_CACHE_FRESH_MS) {
@@ -144,13 +144,14 @@ object SteamCatalogRepository {
         forceRefresh: Boolean = false,
     ): FilterCatalogOutcome {
         val now = System.currentTimeMillis()
-        val cachedEntry = cacheDao.get(FILTER_CACHE_KEY)
+        val filterCacheKey = "$FILTER_CACHE_KEY_PREFIX:${steamLanguage()}"
+        val cachedEntry = cacheDao.get(filterCacheKey)
         val cachedCatalog = cachedEntry?.let { runCatching { decodeFilterCatalog(it.payloadJson) }.getOrNull() }
 
         if (!forceRefresh && cachedEntry != null && cachedCatalog != null &&
             now - cachedEntry.updatedAt <= FILTER_CACHE_FRESH_MS
         ) {
-            cacheDao.touch(FILTER_CACHE_KEY, now)
+            cacheDao.touch(filterCacheKey, now)
             return FilterCatalogOutcome(catalog = cachedCatalog, fromCache = true)
         }
 
@@ -163,7 +164,7 @@ object SteamCatalogRepository {
             if (catalog.groups.isEmpty()) error("Steam returned no filter metadata")
             cacheDao.put(
                 SteamSearchCacheEntry(
-                    cacheKey = FILTER_CACHE_KEY,
+                    cacheKey = filterCacheKey,
                     payloadJson = encodeFilterCatalog(catalog),
                     updatedAt = now,
                     lastAccessedAt = now,
@@ -178,7 +179,7 @@ object SteamCatalogRepository {
             if (cachedEntry != null && cachedCatalog != null &&
                 now - cachedEntry.updatedAt <= FILTER_CACHE_STALE_MS
             ) {
-                cacheDao.touch(FILTER_CACHE_KEY, now)
+                cacheDao.touch(filterCacheKey, now)
                 FilterCatalogOutcome(
                     catalog = cachedCatalog,
                     fromCache = true,
