@@ -117,19 +117,20 @@ object SteamUtils {
         licensedDepotIds: Set<Int>?,
         hasSteamUnlockedBranch: Boolean = false,
     ): String {
-        // A depot installs once its language is chosen if it passes every check except language
+        // Ownership parameters are retained for source compatibility, but intentionally do not
+        // participate in public depot metadata resolution. Steam remains authoritative for access
+        // when a depot key/content request is actually made.
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredOwnership = ownedDlc to licensedDepotIds
+
+        // A depot is a language candidate once it passes metadata-only checks except language
         // and arch. Arch is left out because it is a per-language preference, not a gate.
         fun DepotInfo.installableInItsLanguage(): Boolean {
-            val isDlc = dlcAppId != SteamService.INVALID_APP_ID
             val hasContent = manifests.isNotEmpty() || sharedInstall ||
                 (hasSteamUnlockedBranch && encryptedManifests.isNotEmpty())
-            val ownedIfDlc = !isDlc || ownedDlc == null || ownedDlc.containsKey(depotId)
-            val licensedIfBaseGame = isDlc || systemDefined ||
-                licensedDepotIds == null || depotId in licensedDepotIds
             // Mirror the SteamChina realm gate in filterForDownloadableDepots, or we could pick a
             // language only the final pass drops and lose the real fallback.
-            return isWindowsCompatible && realm != SteamRealm.SteamChina &&
-                hasContent && ownedIfDlc && licensedIfBaseGame
+            return isWindowsCompatible && realm != SteamRealm.SteamChina && hasContent
         }
 
         // Base-game depots only, so an owned in-app DLC's language can't steer the base game.
