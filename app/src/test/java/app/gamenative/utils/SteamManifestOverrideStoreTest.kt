@@ -1,5 +1,6 @@
 package app.gamenative.utils
 
+import app.gamenative.service.SteamService
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.io.ByteArrayOutputStream
@@ -167,6 +168,100 @@ class SteamManifestOverrideStoreTest {
         assertEquals(222L, replaced?.manifestId)
         assertEquals("Sushi", replaced?.provenance?.sourceLabel)
         assertEquals(1_700_000_100_000L, replaced?.provenance?.importedAtEpochMillis)
+    }
+
+    @Test
+    fun dlcNamespaceWinsOverParentFallback() {
+        val baseAppId = 1_222_670
+        val dlcAppId = 1_622_460
+        val depotId = 1_622_461
+
+        SteamManifestOverrideStore.clear(context, baseAppId)
+        SteamManifestOverrideStore.clear(context, dlcAppId)
+        try {
+            SteamManifestOverrideStore.saveLua(
+                context = context,
+                appId = baseAppId,
+                luaText = """setManifestid($depotId, "111", 1000)""",
+                provenance = ManifestOverrideProvenance(
+                    sourceKind = ManifestOverrideSourceKind.LocalFile,
+                    sourceLabel = "legacy-parent",
+                ),
+            )
+
+            val fallback = SteamManifestOverrideStore.findForDepot(
+                context = context,
+                parentAppId = baseAppId,
+                depotId = depotId,
+                dlcAppId = dlcAppId,
+                depotFromApp = SteamService.INVALID_APP_ID,
+                invalidAppId = SteamService.INVALID_APP_ID,
+            )
+            assertEquals(111L, fallback?.manifestId)
+            assertEquals(baseAppId, fallback?.namespaceAppId)
+
+            SteamManifestOverrideStore.saveLua(
+                context = context,
+                appId = dlcAppId,
+                luaText = """setManifestid($depotId, "222", 2000)""",
+                provenance = ManifestOverrideProvenance(
+                    sourceKind = ManifestOverrideSourceKind.DirectProvider,
+                    sourceLabel = "Ryuu",
+                ),
+            )
+
+            val ownedDlcOverride = SteamManifestOverrideStore.findForDepot(
+                context = context,
+                parentAppId = baseAppId,
+                depotId = depotId,
+                dlcAppId = dlcAppId,
+                depotFromApp = SteamService.INVALID_APP_ID,
+                invalidAppId = SteamService.INVALID_APP_ID,
+            )
+            assertEquals(222L, ownedDlcOverride?.manifestId)
+            assertEquals(2000L, ownedDlcOverride?.sizeOnDisk)
+            assertEquals(dlcAppId, ownedDlcOverride?.namespaceAppId)
+            assertEquals("Ryuu", ownedDlcOverride?.provenance?.sourceLabel)
+        } finally {
+            SteamManifestOverrideStore.clear(context, baseAppId)
+            SteamManifestOverrideStore.clear(context, dlcAppId)
+        }
+    }
+
+    @Test
+    fun resolvesOwningNamespaceForDlcAndSharedDepots() {
+        val baseAppId = 1_222_670
+        val dlcAppId = 1_622_460
+        val sharedAppId = 228_980
+        val invalid = SteamService.INVALID_APP_ID
+
+        assertEquals(
+            dlcAppId,
+            SteamManifestOverrideStore.owningAppId(
+                parentAppId = baseAppId,
+                dlcAppId = dlcAppId,
+                depotFromApp = sharedAppId,
+                invalidAppId = invalid,
+            ),
+        )
+        assertEquals(
+            sharedAppId,
+            SteamManifestOverrideStore.owningAppId(
+                parentAppId = baseAppId,
+                dlcAppId = invalid,
+                depotFromApp = sharedAppId,
+                invalidAppId = invalid,
+            ),
+        )
+        assertEquals(
+            baseAppId,
+            SteamManifestOverrideStore.owningAppId(
+                parentAppId = baseAppId,
+                dlcAppId = invalid,
+                depotFromApp = invalid,
+                invalidAppId = invalid,
+            ),
+        )
     }
 
     @Test
