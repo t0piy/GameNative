@@ -144,19 +144,19 @@ object LuaToolsManifestProviderClient {
             return@withContext null
         }
 
-        val sources = checkSources(appId)
-            .filter { it.available && it.transport == LuaToolsProviderTransport.Direct }
+        // Do not make FastFetch availability depend on the discovery backend. Direct provider
+        // endpoints are authoritative enough: 404/invalid content simply falls through to the next
+        // provider and eventually to Steam's normal manifest path.
+        val sources = directProviderTemplates.keys
             .sortedWith(
-                compareBy<LuaToolsManifestSource> {
-                    val url = directProviderUrl(it.name, appId).orEmpty()
+                compareBy<String> {
+                    val url = directProviderUrl(it, appId).orEmpty()
                     if (url.startsWith("https://", ignoreCase = true)) 0 else 1
-                }.thenBy {
-                    directProviderPriority(it.name)
-                },
+                }.thenBy(::directProviderPriority),
             )
 
-        for (source in sources) {
-            val url = directProviderUrl(source.name, appId) ?: continue
+        for (sourceName in sources) {
+            val url = directProviderUrl(sourceName, appId) ?: continue
             if (!allowCleartextDirect && url.startsWith("http://", ignoreCase = true)) {
                 continue
             }
@@ -165,7 +165,7 @@ object LuaToolsManifestProviderClient {
                 downloadProvider(
                     context = context,
                     appId = appId,
-                    sourceName = source.name,
+                    sourceName = sourceName,
                     gameName = gameName,
                 )
             }.onFailure {
@@ -173,13 +173,13 @@ object LuaToolsManifestProviderClient {
                     it,
                     "FastFetch provider failed app=%d source=%s",
                     appId,
-                    source.name,
+                    sourceName,
                 )
             }.getOrNull() ?: continue
 
             if (imported > 0) {
                 return@withContext FastFetchResult(
-                    sourceName = source.name,
+                    sourceName = sourceName,
                     importedCount = imported,
                 )
             }
