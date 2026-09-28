@@ -16,8 +16,8 @@ import timber.log.Timber
  * A version pin imported from a LuaTools-style `setManifestid(...)` directive or from a
  * locally supplied Steam depot manifest.
  *
- * This intentionally carries no depot key, app ticket, token, or other entitlement material.
- * GameNative still asks Steam for the depot key before the native downloader can fetch content.
+ * A LuaTools provider may carry a depot key alongside a manifest pin. The key is only consumed
+ * after GameNative has successfully obtained Steam authorization for that depot.
  */
 enum class ManifestOverrideSourceKind {
     LocalFile,
@@ -42,6 +42,8 @@ data class SteamManifestOverride(
      */
     val manifestId: Long,
     val sizeOnDisk: Long? = null,
+    /** Optional provider key; consumed only after Steam authorizes the depot. */
+    val depotKeyHex: String? = null,
     val provenance: ManifestOverrideProvenance? = null,
     val namespaceAppId: Int? = null,
 )
@@ -49,22 +51,34 @@ data class SteamManifestOverride(
 /**
  * Minimal, non-executing parser for the subset of LuaTools files that is useful to GameNative.
  *
- * We deliberately do NOT embed a Lua VM and do NOT interpret addappid/addtoken/ticket/key
- * directives. Only active `setManifestid(depot, "gid", optionalSize)` lines are accepted.
+ * We deliberately do NOT embed a Lua VM. Active `setManifestid(depot, "gid", optionalSize)`
+ * lines are accepted, plus the 64-hex depot key form of `addappid(...)`.
  */
 object LuaManifestOverrideParser {
     private val setManifestRegex = Regex(
         """^setManifestid\s*\(\s*(\d+)\s*,\s*["']?(\d+)["']?\s*(?:,\s*(\d+))?""",
         RegexOption.IGNORE_CASE,
     )
+    private val addAppIdRegex = Regex(
+        """^addappid\s*\(\s*(\d+)\s*,\s*\d+\s*,\s*["']([0-9a-fA-F]{64})["']\s*\)""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun parse(luaText: String): Map<Int, SteamManifestOverride> {
-        val overrides = linkedMapOf<Int, SteamManifestOverride>()
+        data class Pin(val manifestId: Long, val sizeOnDisk: Long?)
+        val pins = linkedMapOf<Int, Pin>()
+        val keys = linkedMapOf<Int, String>()
 
         luaText.lineSequence().forEach { rawLine ->
             // Lua line comments. A line that begins with "--" therefore becomes empty and is ignored.
             val line = rawLine.substringBefore("--").trim()
             if (line.isEmpty()) return@forEach
+
+            addAppIdRegex.find(line)?.let { keyMatch ->
+                val keyDepotId = keyMatch.groupValues[1].toIntOrNull()?.takeIf { it > 0 }
+                if (keyDepotId != null) keys[keyDepotId] = keyMatch.groupValues[2].lowercase()
+                return@forEach
+            }
 
             val match = setManifestRegex.find(line) ?: return@forEach
             val depotId = match.groupValues[1].toIntOrNull()
@@ -80,14 +94,17 @@ object LuaManifestOverrideParser {
                 ?.takeIf { it > 0L }
 
             // Last active pin wins, matching the effective behavior of repeated setManifestid calls.
-            overrides[depotId] = SteamManifestOverride(
-                depotId = depotId,
-                manifestId = manifestId,
-                sizeOnDisk = size,
-            )
+            pins[depotId] = Pin(manifestId, size)
         }
 
-        return overrides
+        return pins.mapValues { (depotId, pin) ->
+            SteamManifestOverride(
+                depotId = depotId,
+                manifestId = pin.manifestId,
+                sizeOnDisk = pin.sizeOnDisk,
+                depotKeyHex = keys[depotId],
+            )
+        }
     }
 }
 
@@ -421,7 +438,9 @@ object SteamManifestOverrideStore {
             ?.sortedBy { it.lastModified() }
             ?.forEach { file ->
                 overrideFromManifestFile(file)?.let { override ->
+                    val luaKey = overrides[override.depotId]?.depotKeyHex
                     overrides[override.depotId] = override.copy(
+                        depotKeyHex = luaKey,
                         provenance = provenance[provenanceKey(override)],
                         namespaceAppId = appId,
                     )

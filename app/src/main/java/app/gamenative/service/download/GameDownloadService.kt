@@ -575,14 +575,18 @@ object GameDownloadService {
             return null
         }
 
-        // Depot-key requests are scoped to the app associated with the depot, not necessarily
-        // the parent app being downloaded. Ask that app first (dlcAppId, then depotfromapp),
-        // then fall back to the parent app. Steam remains authoritative for the result.
         val owningAppId = when {
             depot.dlcAppId != SteamService.INVALID_APP_ID -> depot.dlcAppId
             depot.depotFromApp != SteamService.INVALID_APP_ID -> depot.depotFromApp
             else -> appId
         }
+
+        // Tenta obter o override de manifesto/chave de provedor externo (ex: LuaTools)
+        val providerOverride = manifestOverridesByApp[owningAppId]?.get(depotId)
+            ?: if (owningAppId != appId) manifestOverridesByApp[appId]?.get(depotId) else null
+        val providerKey = providerOverride?.depotKeyHex?.hexDepotKeyOrNull()
+
+        // Tenta obter a chave oficial do Steam caso a conta possua a licença
         var keyCallback = steamApps.getDepotDecryptionKey(depotId, owningAppId).await()
         if ((keyCallback.result != EResult.OK || keyCallback.depotKey.size != 32) && owningAppId != appId) {
             Timber.tag(TAG).d("Depot $depotId key denied as owning app $owningAppId (${keyCallback.result}), retrying as $appId")
@@ -597,13 +601,37 @@ object GameDownloadService {
             Timber.tag(TAG).w(
                 "Skipping depot $depotId: Steam denied the depot key (${keyCallback.result})$appScope",
             )
+
+        // Define a chave do depot: utiliza a chave do provedor/override se disponível,
+        // ou a chave do Steam caso a conta possua o jogo.
+        val depotKey = providerKey ?: if (keyCallback.result == EResult.OK && keyCallback.depotKey.size == 32) {
+            keyCallback.depotKey
+        } else {
+            null
+        }
+
+        // Se não possuir chave do Steam nem override de chave externa, pula o depot
+        if (depotKey == null) {
+            val dlcNote = if (depot.dlcAppId != SteamService.INVALID_APP_ID) {
+                " (depot belongs to DLC app ${depot.dlcAppId} — not owned by this account?)"
+            } else {
+                ""
+            }
+            Timber.tag(TAG).w("Skipping depot $depotId: no valid decryption key from Steam (${keyCallback.result}) or override $dlcNote")
             return null
         }
 
         val requestCode = fetchManifestRequestCode(
             steamContent, depotId, owningAppId, gid, branch, parentScope,
         )
-        return ResolvedDepot(depotId, gid, keyCallback.depotKey, requestCode)
+        return ResolvedDepot(depotId, gid, depotKey, requestCode)
+    }
+
+    private fun String.hexDepotKeyOrNull(): ByteArray? {
+        if (length != 64 || any { it.digitToIntOrNull(16) == null }) return null
+        return ByteArray(32) { index ->
+            substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
     }
 
     private suspend fun resolveManifestGid(
