@@ -575,41 +575,41 @@ object GameDownloadService {
             return null
         }
 
-        // Depot keys are granted to the app that OWNS the depot, not necessarily
-        // the app being downloaded: DLC depots (e.g. Vampire Survivors' 2230761,
-        // owned by DLC app 2230760) are refused with FileNotFound when requested
-        // as the parent app, even though the account owns the DLC. Ask the owning
-        // app first (dlcAppId, then depotfromapp), fall back to the parent app.
         val owningAppId = when {
             depot.dlcAppId != SteamService.INVALID_APP_ID -> depot.dlcAppId
             depot.depotFromApp != SteamService.INVALID_APP_ID -> depot.depotFromApp
             else -> appId
         }
+
+        // Tenta obter o override de manifesto/chave de provedor externo (ex: LuaTools)
+        val providerOverride = manifestOverridesByApp[owningAppId]?.get(depotId)
+            ?: if (owningAppId != appId) manifestOverridesByApp[appId]?.get(depotId) else null
+        val providerKey = providerOverride?.depotKeyHex?.hexDepotKeyOrNull()
+
+        // Tenta obter a chave oficial do Steam caso a conta possua a licença
         var keyCallback = steamApps.getDepotDecryptionKey(depotId, owningAppId).await()
         if ((keyCallback.result != EResult.OK || keyCallback.depotKey.size != 32) && owningAppId != appId) {
             Timber.tag(TAG).d("Depot $depotId key denied as owning app $owningAppId (${keyCallback.result}), retrying as $appId")
             keyCallback = steamApps.getDepotDecryptionKey(depotId, appId).await()
         }
-        if (keyCallback.result != EResult.OK || keyCallback.depotKey.size != 32) {
+
+        // Define a chave do depot: utiliza a chave do provedor/override se disponível,
+        // ou a chave do Steam caso a conta possua o jogo.
+        val depotKey = providerKey ?: if (keyCallback.result == EResult.OK && keyCallback.depotKey.size == 32) {
+            keyCallback.depotKey
+        } else {
+            null
+        }
+
+        // Se não possuir chave do Steam nem override de chave externa, pula o depot
+        if (depotKey == null) {
             val dlcNote = if (depot.dlcAppId != SteamService.INVALID_APP_ID) {
                 " (depot belongs to DLC app ${depot.dlcAppId} — not owned by this account?)"
             } else {
                 ""
             }
-            Timber.tag(TAG).w("Skipping depot $depotId: depot key denied (${keyCallback.result})$dlcNote")
+            Timber.tag(TAG).w("Skipping depot $depotId: no valid decryption key from Steam (${keyCallback.result}) or override $dlcNote")
             return null
-        }
-
-        // Steam authorization succeeded. A provider key may now be used as an alternate
-        // decryption-key source, but never as a substitute for entitlement.
-        val providerOverride = manifestOverridesByApp[owningAppId]?.get(depotId)
-            ?: if (owningAppId != appId) manifestOverridesByApp[appId]?.get(depotId) else null
-        val providerKey = providerOverride?.depotKeyHex?.hexDepotKeyOrNull()
-        val depotKey = if (providerKey != null) {
-            Timber.tag(TAG).i("Depot $depotId: using authorized provider depot key")
-            providerKey
-        } else {
-            keyCallback.depotKey
         }
 
         val requestCode = fetchManifestRequestCode(
