@@ -574,7 +574,7 @@ object GameDownloadService {
             Timber.tag(TAG).w("Skipping depot $depotId: no manifest gid for branch $branch")
             return null
         }
-
+    
         val owningAppId = when {
             depot.dlcAppId != SteamService.INVALID_APP_ID -> depot.dlcAppId
             depot.depotFromApp != SteamService.INVALID_APP_ID -> depot.depotFromApp
@@ -601,6 +601,7 @@ object GameDownloadService {
             Timber.tag(TAG).w(
                 "Skipping depot $depotId: Steam denied the depot key (${keyCallback.result})$appScope",
             )
+        }
 
         // Define a chave do depot: utiliza a chave do provedor/override se disponível,
         // ou a chave do Steam caso a conta possua o jogo.
