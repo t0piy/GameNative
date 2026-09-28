@@ -600,10 +600,29 @@ object GameDownloadService {
             return null
         }
 
+        // Steam authorization succeeded. A provider key may now be used as an alternate
+        // decryption-key source, but never as a substitute for entitlement.
+        val providerOverride = manifestOverridesByApp[owningAppId]?.get(depotId)
+            ?: if (owningAppId != appId) manifestOverridesByApp[appId]?.get(depotId) else null
+        val providerKey = providerOverride?.depotKeyHex?.hexDepotKeyOrNull()
+        val depotKey = if (providerKey != null) {
+            Timber.tag(TAG).i("Depot $depotId: using authorized provider depot key")
+            providerKey
+        } else {
+            keyCallback.depotKey
+        }
+
         val requestCode = fetchManifestRequestCode(
             steamContent, depotId, owningAppId, gid, branch, parentScope,
         )
-        return ResolvedDepot(depotId, gid, keyCallback.depotKey, requestCode)
+        return ResolvedDepot(depotId, gid, depotKey, requestCode)
+    }
+
+    private fun String.hexDepotKeyOrNull(): ByteArray? {
+        if (length != 64 || any { it.digitToIntOrNull(16) == null }) return null
+        return ByteArray(32) { index ->
+            substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
     }
 
     private suspend fun resolveManifestGid(
