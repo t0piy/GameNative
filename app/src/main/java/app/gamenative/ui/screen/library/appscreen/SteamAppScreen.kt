@@ -517,6 +517,12 @@ class SteamAppScreen : BaseAppScreen() {
         PluviaApp.events.on<AndroidEvent.LibraryInstallStatusChanged, Unit>(installListener)
         disposables += { PluviaApp.events.off<AndroidEvent.LibraryInstallStatusChanged, Unit>(installListener) }
 
+        val manifestListener: (AndroidEvent.SteamManifestOverridesChanged) -> Unit = { event ->
+            if (event.appId == appId) onStateChanged()
+        }
+        PluviaApp.events.on<AndroidEvent.SteamManifestOverridesChanged, Unit>(manifestListener)
+        disposables += { PluviaApp.events.off<AndroidEvent.SteamManifestOverridesChanged, Unit>(manifestListener) }
+
         val downloadStatusListener: (AndroidEvent.DownloadStatusChanged) -> Unit = { event ->
             if (event.appId == appId) {
                 if (event.isDownloading) {
@@ -925,6 +931,7 @@ class SteamAppScreen : BaseAppScreen() {
                             )
                         }
                         hasManifestOverrides = true
+                        PluviaApp.events.emit(AndroidEvent.SteamManifestOverridesChanged(gameId))
                         SnackbarManager.show(
                             context.getString(R.string.manifest_overrides_imported, count),
                         )
@@ -1143,6 +1150,7 @@ class SteamAppScreen : BaseAppScreen() {
                                                                 ?: libraryItem.name,
                                                         )
                                                     hasManifestOverrides = true
+                                                    PluviaApp.events.emit(AndroidEvent.SteamManifestOverridesChanged(gameId))
                                                     showManifestProvidersDialog = false
                                                     SnackbarManager.show(
                                                         context.getString(
@@ -1210,6 +1218,7 @@ class SteamAppScreen : BaseAppScreen() {
                                                             ?.name,
                                                     )
                                             hasManifestOverrides = true
+                                            PluviaApp.events.emit(AndroidEvent.SteamManifestOverridesChanged(gameId))
                                             showManifestProvidersDialog = false
                                             SnackbarManager.show(
                                                 context.getString(
@@ -1362,6 +1371,7 @@ class SteamAppScreen : BaseAppScreen() {
                                         url = manifestUrl,
                                     )
                                     hasManifestOverrides = true
+                                    PluviaApp.events.emit(AndroidEvent.SteamManifestOverridesChanged(gameId))
                                     showManifestUrlDialog = false
                                     manifestUrl = ""
                                     SnackbarManager.show(
@@ -1541,6 +1551,7 @@ class SteamAppScreen : BaseAppScreen() {
                                     SteamManifestOverrideStore.clear(context, namespaceAppId)
                                 }
                             }
+                            PluviaApp.events.emit(AndroidEvent.SteamManifestOverridesChanged(gameId))
                             if (cleared) {
                                 hasManifestOverrides = false
                                 activeManifestOverrides = emptyList()

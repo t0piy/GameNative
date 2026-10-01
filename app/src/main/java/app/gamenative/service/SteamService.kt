@@ -66,6 +66,7 @@ import app.gamenative.utils.Net
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.SteamManifestOverride
 import app.gamenative.utils.SteamManifestOverrideStore
+import app.gamenative.utils.SteamInstallVersionPolicy
 import app.gamenative.utils.asyncIsolated
 import app.gamenative.utils.CURRENT_UFS_PARSE_VERSION
 import app.gamenative.utils.generateSteamApp
@@ -3727,36 +3728,21 @@ class SteamService : Service(), IChallengeUrlChanged {
             appId: Int,
             branch: String = "public",
         ): Boolean = withContext(Dispatchers.IO) {
-            val appInfo = getAppInfoOf(appId) ?: return@withContext false
-            val installed = installedManifestIds(appId)
+            val context = instance?.applicationContext ?: return@withContext false
+            if (!isAppInstalled(appId)) return@withContext false
+            val installed = SteamInstallVersionPolicy.readInstalledManifestIds(
+                File(getAppDirPath(appId), ".DepotDownloader"),
+            )
             if (installed.isEmpty()) return@withContext false
-            getDownloadableDepots(appId).keys.any { depotId ->
-                val current = appInfo.depots[depotId]?.manifests?.get(branch)?.gid ?: return@any false
-                val onDisk = installed[depotId] ?: return@any false
-                current.toULong() != onDisk
-            }
-        }
-
-        private fun installedManifestIds(appId: Int): Map<Int, ULong> {
-            val cacheDir = File(getAppDirPath(appId), ".DepotDownloader")
-            val ids = mutableMapOf<Int, ULong>()
-            runCatching { File(cacheDir, "depot.config").readText() }.getOrNull()?.let { text ->
-                val block = text.substringAfter("\"installedManifestIDs\"", "").substringAfter('{', "").substringBefore('}')
-                Regex("\"(\\d+)\"\\s*:\\s*(\\d+)").findAll(block).forEach { match ->
-                    val depotId = match.groupValues[1].toIntOrNull() ?: return@forEach
-                    val gid = match.groupValues[2].toULongOrNull() ?: return@forEach
-                    ids[depotId] = gid
-                }
-            }
-            if (ids.isEmpty()) {
-                cacheDir.listFiles()?.forEach { file ->
-                    val match = Regex("""^(\d+)_(\d+)\.manifest$""").matchEntire(file.name) ?: return@forEach
-                    val depotId = match.groupValues[1].toIntOrNull() ?: return@forEach
-                    val gid = match.groupValues[2].toULongOrNull() ?: return@forEach
-                    ids[depotId] = gid
-                }
-            }
-            return ids
+            val depots = getDownloadableDepots(appId)
+            val pins = SteamManifestOverrideStore.loadForAppDepots(context, appId, depots)
+                .mapValues { (_, pin) -> pin.manifestId.toULong() }
+            val advertised = depots.mapNotNull { (id, depot) ->
+                depot.manifests[branch]?.gid?.let { id to it.toULong() }
+            }.toMap()
+            // Shared by the library's Update button AND the real-Steam pre-launch gate.
+            // Provider availability alone does not prove a newer downloadable provider build.
+            return@withContext SteamInstallVersionPolicy.isStoreUpdatePending(installed, advertised, pins)
         }
 
         suspend fun checkPrivateBranchPassword(appId: Int, password: String): Map<String, ByteArray> =

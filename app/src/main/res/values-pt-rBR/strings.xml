@@ -2657,4 +2657,5 @@
     <string name="explorer_steam_manual_count">%1$d adicionados por AppID</string>
     <string name="explorer_steam_remove_manual">Remover entrada manual</string>
 
+    <string name="manifest_overrides_update_policy">Jogos instalados com estes manifests têm atualização manual. Atualizações da Loja Steam não bloqueiam Jogar. Para trocar de versão, importe um manifest disponível no provider e atualize ou verifique os arquivos manualmente. Remover os overrides restaura a verificação normal de atualizações da Steam.</string>
 </resources>

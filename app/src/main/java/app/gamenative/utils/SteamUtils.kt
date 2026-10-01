@@ -736,28 +736,28 @@ object SteamUtils {
      * Creates a Steam ACF (Application Cache File) manifest for the given app
      * This allows real Steam to detect the game as installed
      */
-    private fun customExecutables(depots: Map<Int, DepotInfo>, installedBranch: String, downloaderCacheDir: File): List<String> =
-        depots.flatMap { (depotId, depotInfo) ->
-            val gid = (depotInfo.manifests[installedBranch]
-                ?: depotInfo.manifests["public"]
-                ?: depotInfo.manifests.values.firstOrNull())?.gid ?: return@flatMap emptyList()
+    private fun customExecutables(depots: Map<Int, DepotInfo>, downloaderCacheDir: File): List<String> {
+        val installed = SteamInstallVersionPolicy.readInstalledManifestIds(downloaderCacheDir)
+        return depots.flatMap { (depotId, _) ->
+            val gid = installed[depotId] ?: return@flatMap emptyList()
             val manifest = runCatching {
-                DepotManifest.loadFromFile(File(downloaderCacheDir, "${depotId}_${gid.toULong()}.manifest").absolutePath)
+                DepotManifest.loadFromFile(File(downloaderCacheDir, "${depotId}_${gid}.manifest").absolutePath)
             }.getOrNull()
             manifest?.files.orEmpty()
                 .filter { it.flags.contains(EDepotFileFlag.CustomExecutable) }
                 .map { it.fileName.replace('/', '\\') }
         }
+    }
 
     fun hasCustomExecutables(steamAppId: Int): Boolean {
-        val installedBranch = SteamService.getInstalledApp(steamAppId)?.branch ?: "public"
         val downloaderCacheDir = File(SteamService.getAppDirPath(steamAppId), ".DepotDownloader")
-        return customExecutables(SteamService.getDownloadableDepots(steamAppId), installedBranch, downloaderCacheDir).isNotEmpty()
+        return customExecutables(SteamService.getDownloadableDepots(steamAppId), downloaderCacheDir).isNotEmpty()
     }
 
     private fun createAppManifest(context: Context, steamAppId: Int) {
         try {
             Timber.i("Attempting to createAppManifest for appId: $steamAppId")
+            if (!SteamService.isAppInstalled(steamAppId)) return
             val appInfo = SteamService.getAppInfoOf(steamAppId)
             if (appInfo == null) {
                 Timber.w("No app info found for appId: $steamAppId")
@@ -791,26 +791,62 @@ object SteamUtils {
             }
 
             val installedBranch = SteamService.getInstalledApp(steamAppId)?.branch ?: "public"
-            val buildId = (appInfo.branches[installedBranch] ?: appInfo.branches["public"])?.buildId ?: 0L
+            val storeBuildId = (appInfo.branches[installedBranch] ?: appInfo.branches["public"])?.buildId ?: 0L
             val downloadableDepots = SteamService.getDownloadableDepots(steamAppId)
-
+            val overrides = SteamManifestOverrideStore.loadForAppDepots(context, steamAppId, downloadableDepots)
             val regularDepots = mutableMapOf<Int, DepotInfo>()
             val sharedDepots = mutableMapOf<Int, DepotInfo>()
             val downloaderCacheDir = File(gameDir, ".DepotDownloader")
+            val installedIds = SteamInstallVersionPolicy.readInstalledManifestIds(downloaderCacheDir)
+            if (installedIds.isEmpty()) {
+                Timber.w("No committed depot versions for app $steamAppId; preserving existing client manifest")
+                return
+            }
+            val clientDepots = mutableMapOf<Int, SteamInstallVersionPolicy.ClientDepot>()
+            val storeManifestIds = mutableMapOf<Int, ULong>()
 
             downloadableDepots.forEach { (depotId, depotInfo) ->
-                val manifest = depotInfo.manifests[installedBranch]
+                val advertised = depotInfo.manifests[installedBranch]
                     ?: depotInfo.manifests["public"]
                     ?: depotInfo.manifests.values.firstOrNull()
-                if (manifest != null && manifest.gid != 0L) {
-                    if (File(downloaderCacheDir, "${depotId}_${manifest.gid.toULong()}.manifest").isFile) regularDepots[depotId] = depotInfo
-                } else {
+                advertised?.gid?.takeIf { it != 0L }?.let { storeManifestIds[depotId] = it.toULong() }
+                val installedGid = installedIds[depotId]
+                val pin = overrides[depotId]?.takeIf { it.manifestId.toULong() == installedGid }
+                if (installedGid != null && (advertised != null || pin != null)) {
+                    // A cached/current Store manifest is not proof that its files are installed.
+                    // Prefer the journal's committed GID, including older/custom provider builds.
+                    val installedMetadata = if (advertised?.gid?.toULong() != installedGid) {
+                        runCatching {
+                            val file = File(downloaderCacheDir, "${depotId}_${installedGid}.manifest")
+                            SteamManifestOverrideStore.parseRawSteamManifestMetadata(file.readBytes())
+                                ?.takeIf { it.depotId == depotId && it.manifestId.toULong() == installedGid }
+                        }.getOrNull()
+                    } else {
+                        null
+                    }
+                    val size = installedMetadata?.sizeOnDisk ?: pin?.sizeOnDisk
+                        ?: advertised?.takeIf { it.gid.toULong() == installedGid }?.size ?: 0L
+                    clientDepots[depotId] = SteamInstallVersionPolicy.ClientDepot(installedGid, size)
+                    regularDepots[depotId] = depotInfo
+                } else if (advertised == null) {
                     sharedDepots[depotId] = depotInfo
                 }
             }
 
-            // Find the main content depot (owner) - typically the one with the lowest ID that has content
-            val mainDepotId = regularDepots.keys.minOrNull()
+            val acfFile = File(steamappsDir, "appmanifest_$steamAppId.acf")
+            val previousAcf = runCatching { KeyValue.loadFromString(acfFile.readText()) }.getOrNull()
+            val previousInstalled = previousAcf?.get("InstalledDepots")?.children.orEmpty().mapNotNull { depot ->
+                val id = depot.name?.toIntOrNull() ?: return@mapNotNull null
+                val gid = depot["manifest"].value?.toULongOrNull() ?: return@mapNotNull null
+                id to gid
+            }.toMap()
+            val buildId = SteamInstallVersionPolicy.clientBuildId(
+                installed = clientDepots.mapValues { (_, depot) -> depot.manifestId },
+                storeManifests = storeManifestIds,
+                storeBuildId = storeBuildId,
+                previousInstalled = previousInstalled,
+                previousBuildId = previousAcf?.get("buildid")?.value?.toLongOrNull() ?: 0L,
+            )
 
             // Create ACF content
             val acfContent = buildString {
@@ -835,24 +871,9 @@ object SteamUtils {
                 appendLine("\t\"AllowOtherDownloadsWhileRunning\"\t\t\"0\"")
                 appendLine("\t\"ScheduledAutoUpdate\"\t\t\"0\"")
 
-                // Add InstalledDepots section (only regular depots with actual manifests)
-                if (regularDepots.isNotEmpty()) {
-                    appendLine("\t\"InstalledDepots\"")
-                    appendLine("\t{")
-                    regularDepots.forEach { (depotId, depotInfo) ->
-                        val manifest = depotInfo.manifests[installedBranch]
-                            ?: depotInfo.manifests["public"]
-                            ?: depotInfo.manifests.values.firstOrNull()
-                        appendLine("\t\t\"$depotId\"")
-                        appendLine("\t\t{")
-                        appendLine("\t\t\t\"manifest\"\t\t\"${manifest?.gid ?: "0"}\"")
-                        appendLine("\t\t\t\"size\"\t\t\"${manifest?.size ?: 0}\"")
-                        appendLine("\t\t}")
-                    }
-                    appendLine("\t}")
-                }
+                append(SteamInstallVersionPolicy.installedDepotsAcf(clientDepots))
 
-                val customExecutables = customExecutables(regularDepots, installedBranch, downloaderCacheDir)
+                val customExecutables = customExecutables(regularDepots, downloaderCacheDir)
                 if (customExecutables.isNotEmpty()) {
                     appendLine("\t\"CheckGuid\"")
                     appendLine("\t{")
@@ -866,18 +887,14 @@ object SteamUtils {
                 appendLine("}")
             }
 
-            // Write ACF file
-            val acfFile = File(steamappsDir, "appmanifest_$steamAppId.acf")
+            // Rewrite stale launch metadata with the actual installed depot versions.
             acfFile.writeText(acfContent)
 
             Timber.i("Created ACF manifest for ${appInfo.name} at ${acfFile.absolutePath}")
 
-            val depotCacheDir = File(steamappsDir, "depotcache").apply { mkdirs() }
-            regularDepots.forEach { (depotId, depotInfo) ->
-                val gid = (depotInfo.manifests[installedBranch]
-                    ?: depotInfo.manifests["public"]
-                    ?: depotInfo.manifests.values.firstOrNull())?.gid ?: return@forEach
-                val src = File(downloaderCacheDir, "${depotId}_${gid.toULong()}.manifest")
+            val depotCacheDir = File(steamappsDir.parentFile, "depotcache").apply { mkdirs() }
+            clientDepots.forEach { (depotId, depot) ->
+                val src = File(downloaderCacheDir, "${depotId}_${depot.manifestId}.manifest")
                 val dst = File(depotCacheDir, src.name)
                 if (src.isFile && (!dst.isFile || dst.length() != src.length())) {
                     src.copyTo(dst, overwrite = true)

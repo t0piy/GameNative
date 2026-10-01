@@ -2139,8 +2139,9 @@ fun preLaunchApp(
             if (gameSource == GameSource.STEAM && container.isLaunchRealSteam && !isOffline && !container.isSteamOfflineMode &&
                 SteamService.getInstalledApp(gameId) != null
             ) {
-                // The Valve client refuses to start a build behind its own manifest and never
-                // downloads itself. Offline launches trust the manifest the app wrote, so they skip this.
+                // Only Steam-managed installs follow the current branch. The shared policy
+                // excludes LuaTools/local version pins, so unavailable Store updates never block
+                // their Play action here. Offline launches skip the Store update check entirely.
                 val branch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
                 if (SteamService.isUpdatePending(gameId, branch)) {
                     val userChoice = CompletableDeferred<Boolean>()
