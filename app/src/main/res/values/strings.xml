@@ -2809,4 +2809,5 @@
     <string name="explorer_steam_manual_count">%1$d added by AppID</string>
     <string name="explorer_steam_remove_manual">Remove manual entry</string>
 
+    <string name="manifest_overrides_update_policy">Installed games using these manifests are updated manually. Steam Store updates do not block Play. To change versions, import a manifest available from your provider and explicitly update or verify files. Removing the overrides restores normal Steam update checks.</string>
 </resources>

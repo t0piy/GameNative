@@ -51,6 +51,11 @@ fun ManifestOverridesDialog(
                 if (overrides.isEmpty()) {
                     Text(stringResource(R.string.manifest_overrides_empty))
                 } else {
+                    Text(
+                        stringResource(R.string.manifest_overrides_update_policy),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     overrides.sortedBy { it.depotId }.forEachIndexed { index, override ->
                         if (index > 0) {
                             HorizontalDivider()

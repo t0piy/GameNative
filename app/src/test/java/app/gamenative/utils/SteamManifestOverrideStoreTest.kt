@@ -1,6 +1,10 @@
 package app.gamenative.utils
 
 import app.gamenative.service.SteamService
+import app.gamenative.data.DepotInfo
+import app.gamenative.enums.OS
+import app.gamenative.enums.OSArch
+import java.util.EnumSet
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.io.ByteArrayOutputStream
@@ -297,4 +301,43 @@ class SteamManifestOverrideStoreTest {
         assertEquals(987654L, overrides[481]?.sizeOnDisk)
         assertTrue(SteamManifestOverrideStore.hasOverrides(context, appId))
     }
+    @Test
+    fun versionPolicyUsesDlcNamespacePinBeforeParentFallback() {
+        val dlcId = 482
+        try {
+            SteamManifestOverrideStore.saveLua(context, appId, "setManifestid(481, 100)")
+            SteamManifestOverrideStore.saveLua(context, dlcId, "setManifestid(481, 200)\nsetManifestid(483, 300)")
+            val depot = versionPolicyDepot(481, dlcId)
+            val resolved = SteamManifestOverrideStore.loadForAppDepots(context, appId, mapOf(481 to depot))
+            assertEquals(200L, resolved[481]?.manifestId)
+            assertEquals(dlcId, resolved[481]?.namespaceAppId)
+            assertFalse(resolved.containsKey(483))
+            SteamManifestOverrideStore.clear(context, dlcId)
+            assertEquals(100L, SteamManifestOverrideStore.loadForAppDepots(context, appId, mapOf(481 to depot))[481]?.manifestId)
+        } finally {
+            SteamManifestOverrideStore.clear(context, dlcId)
+        }
+    }
+
+    @Test
+    fun emptyOrKeyOnlyLuaDoesNotDisableVersionChecks() {
+        val file = SteamManifestOverrideStore.fileFor(context, appId)
+        file.parentFile!!.mkdirs()
+        file.writeText("addappid(480)\n-- setManifestid(481, 100)")
+        val pins = SteamManifestOverrideStore.loadForAppDepots(context, appId, mapOf(481 to versionPolicyDepot(481)))
+        assertTrue(pins.isEmpty())
+        assertTrue(SteamInstallVersionPolicy.isStoreUpdatePending(mapOf(481 to 100uL), mapOf(481 to 200uL), emptyMap()))
+    }
+
+    private fun versionPolicyDepot(id: Int, dlcId: Int = SteamService.INVALID_APP_ID) = DepotInfo(
+        depotId = id,
+        dlcAppId = dlcId,
+        depotFromApp = SteamService.INVALID_APP_ID,
+        sharedInstall = false,
+        osList = EnumSet.of(OS.windows),
+        osArch = OSArch.Arch64,
+        manifests = emptyMap(),
+        encryptedManifests = emptyMap(),
+    )
+
 }

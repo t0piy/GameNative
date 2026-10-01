@@ -1,6 +1,8 @@
 package app.gamenative.utils
 
 import android.content.Context
+import app.gamenative.data.DepotInfo
+import app.gamenative.service.SteamService
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -448,6 +450,28 @@ object SteamManifestOverrideStore {
             }
 
         return overrides
+    }
+
+    /** Resolve the same owner/DLC namespace precedence used by the download pipeline. */
+    fun loadForAppDepots(
+        context: Context,
+        parentAppId: Int,
+        depots: Map<Int, DepotInfo>,
+    ): Map<Int, SteamManifestOverride> {
+        val parentPins = load(context, parentAppId)
+        val namespaces = mutableMapOf(parentAppId to parentPins)
+        val resolved = parentPins.toMutableMap()
+        depots.forEach { (depotId, depot) ->
+            val ownerAppId = owningAppId(
+                parentAppId, depot.dlcAppId, depot.depotFromApp, SteamService.INVALID_APP_ID,
+            )
+            if (ownerAppId != parentAppId && ownerAppId > 0) {
+                namespaces.getOrPut(ownerAppId) { load(context, ownerAppId) }[depotId]?.let {
+                    resolved[depotId] = it
+                }
+            }
+        }
+        return resolved
     }
 
     fun hasOverrides(context: Context, appId: Int): Boolean {
