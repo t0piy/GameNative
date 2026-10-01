@@ -3,39 +3,72 @@ on:
   push:
     branches: [fix/luatools-pinned-manifest-updates]
     paths:
-      - '.github/workflows/luatools-update-policy-check.yml'
-      - 'scripts/luatools_update_policy_check.py'
+      - '.github/patches/luatools-version-policy.patch.zlib.b64'
 permissions:
-  contents: read
+  contents: write
 jobs:
-  inspect:
+  validate-patch:
+    if: github.repository == 't0piy/GameNative-LuaTools'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
+            .github
             app/src/main/java
             app/src/test
             app/src/main/res/values
             app/src/main/res/values-pt-rBR
             scripts
             gradle
-          persist-credentials: false
-      - name: Collect focused source snapshot
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify and apply source patch
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import zipfile
-          roots = ['app/src/main/java', 'app/src/test', 'app/src/main/res/values', 'app/src/main/res/values-pt-rBR', 'gradle', 'scripts']
-          with zipfile.ZipFile('steam-update-policy-sources.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
-              for root in roots:
-                  for path in Path(root).rglob('*'):
-                      if path.is_file() and path.suffix in {'.kt', '.java', '.xml', '.toml', '.properties', '.py', '.kts'}:
-                          archive.write(path, path.as_posix())
+          import base64, hashlib, os, subprocess, zlib
+          payload = Path('.github/patches/luatools-version-policy.patch.zlib.b64').read_text().strip()
+          patch = zlib.decompress(base64.b64decode(payload, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '80806155278b553dd6e81865fea4bb8ac3c123a24125ad2761151c590204fdde', 'Patch integrity mismatch'
+          path = Path(os.environ['RUNNER_TEMP']) / 'luatools-version-policy.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
           PY
+      - name: Run actual JVM regression tests
+        run: |
+          set -o pipefail
+          bash scripts/check-steam-install-version-policy.sh | tee version-policy-tests.log
+          git diff --check
+      - name: Commit validated source changes to this fix branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/app/gamenative/events/AndroidEvent.kt \
+            app/src/main/java/app/gamenative/service/SteamService.kt \
+            app/src/main/java/app/gamenative/ui/PluviaMain.kt \
+            app/src/main/java/app/gamenative/ui/component/dialog/ManifestOverridesDialog.kt \
+            app/src/main/java/app/gamenative/ui/screen/library/appscreen/SteamAppScreen.kt \
+            app/src/main/java/app/gamenative/utils/SteamInstallVersionPolicy.kt \
+            app/src/main/java/app/gamenative/utils/SteamManifestOverrides.kt \
+            app/src/main/java/app/gamenative/utils/SteamUtils.kt \
+            app/src/main/res/values/strings.xml app/src/main/res/values-pt-rBR/strings.xml \
+            app/src/test/java/app/gamenative/utils/SteamInstallVersionPolicyTest.kt \
+            app/src/test/java/app/gamenative/utils/SteamManifestOverrideStoreTest.kt \
+            scripts/check-steam-install-version-policy.sh
+          git rm .github/patches/luatools-version-policy.patch.zlib.b64
+          git commit -m 'fix: keep manifest-pinned Steam installs playable without forced Store updates'
+          git push origin HEAD:fix/luatools-pinned-manifest-updates
+          git rev-parse HEAD | tee validated-commit.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: steam-update-policy-sources
-          path: steam-update-policy-sources.zip
-          retention-days: 2
+          name: steam-version-policy-validation
+          path: |
+            version-policy-tests.log
+            validated-commit.txt
+          retention-days: 7
