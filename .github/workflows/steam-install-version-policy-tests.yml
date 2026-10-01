@@ -1,0 +1,32 @@
+name: Steam install version policy tests
+on:
+  pull_request:
+    paths:
+      - 'app/src/main/java/app/gamenative/utils/SteamInstallVersionPolicy.kt'
+      - 'app/src/main/java/app/gamenative/utils/SteamManifestOverrides.kt'
+      - 'app/src/main/java/app/gamenative/utils/SteamUtils.kt'
+      - 'app/src/main/java/app/gamenative/service/SteamService.kt'
+      - 'app/src/main/java/app/gamenative/ui/PluviaMain.kt'
+      - 'app/src/main/java/app/gamenative/ui/screen/library/appscreen/SteamAppScreen.kt'
+      - 'app/src/test/java/app/gamenative/utils/SteamInstallVersionPolicyTest.kt'
+      - 'scripts/check-steam-install-version-policy.sh'
+      - '.github/workflows/steam-install-version-policy-tests.yml'
+permissions:
+  contents: read
+jobs:
+  version-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            app/src/main/java
+            app/src/test/java/app/gamenative/utils
+            scripts
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash scripts/check-steam-install-version-policy.sh
