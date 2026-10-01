@@ -1,0 +1,41 @@
+name: LuaTools update policy check
+on:
+  push:
+    branches: [fix/luatools-pinned-manifest-updates]
+    paths:
+      - '.github/workflows/luatools-update-policy-check.yml'
+      - 'scripts/luatools_update_policy_check.py'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            app/src/main/java
+            app/src/test
+            app/src/main/res/values
+            app/src/main/res/values-pt-rBR
+            scripts
+            gradle
+          persist-credentials: false
+      - name: Collect focused source snapshot
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          roots = ['app/src/main/java', 'app/src/test', 'app/src/main/res/values', 'app/src/main/res/values-pt-rBR', 'gradle', 'scripts']
+          with zipfile.ZipFile('steam-update-policy-sources.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for root in roots:
+                  for path in Path(root).rglob('*'):
+                      if path.is_file() and path.suffix in {'.kt', '.java', '.xml', '.toml', '.properties', '.py', '.kts'}:
+                          archive.write(path, path.as_posix())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steam-update-policy-sources
+          path: steam-update-policy-sources.zip
+          retention-days: 2
